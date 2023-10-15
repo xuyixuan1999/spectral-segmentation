@@ -35,8 +35,8 @@ if __name__ == "__main__":
     #-------------------------------------------------------#
     VOCdevkit_path  = 'VOCdevkit'
 
-    image_ids       = open(os.path.join(VOCdevkit_path, "VOC2007/ImageSets/Segmentation/val.txt"),'r').read().splitlines() 
-    gt_dir          = os.path.join(VOCdevkit_path, "VOC2007/SegmentationClass/")
+    image_ids       = open(os.path.join(VOCdevkit_path, "ImageSets/Segmentation/val.txt"),'r').read().splitlines() 
+    gt_dir          = os.path.join(VOCdevkit_path, "SegmentationClass/")
     miou_out_path   = "miou_out"
     pred_dir        = os.path.join(miou_out_path, 'detection-results')
 
@@ -50,7 +50,7 @@ if __name__ == "__main__":
 
         print("Get predict result.")
         for image_id in tqdm(image_ids):
-            image_path  = os.path.join(VOCdevkit_path, "VOC2007/JPEGImages/"+image_id+".jpg")
+            image_path  = os.path.join(VOCdevkit_path, "JPEGImages/"+image_id+".jpg")
             image       = Image.open(image_path)
             image       = unet.get_miou_png(image)
             image.save(os.path.join(pred_dir, image_id + ".png"))

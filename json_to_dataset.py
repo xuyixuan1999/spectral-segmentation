@@ -5,7 +5,7 @@ import os.path as osp
 
 import numpy as np
 import PIL.Image
-from labelme import utils
+# from labelme import utils
 
 '''
 制作自己的语义分割数据集需要注意以下几点：

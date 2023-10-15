@@ -11,6 +11,7 @@ import scipy.signal
 import cv2
 import shutil
 import numpy as np
+import logging
 
 from PIL import Image
 from tqdm import tqdm
@@ -18,17 +19,27 @@ from torch.utils.tensorboard import SummaryWriter
 from .utils import cvtColor, preprocess_input, resize_image
 from .utils_metrics import compute_mIoU
 
+def initialize_logger(file_dir):
+    logger = logging.getLogger()
+    fhandler = logging.FileHandler(filename=file_dir, mode='a')
+    formatter = logging.Formatter('%(asctime)s - %(message)s', "%Y-%m-%d %H:%M:%S")
+    fhandler.setFormatter(formatter)
+    logger.addHandler(fhandler)
+    logger.setLevel(logging.INFO)
+    return logger
 
 class LossHistory():
-    def __init__(self, log_dir, model, input_shape, val_loss_flag=True):
+    def __init__(self, log_dir, model, input_shape):
         self.log_dir        = log_dir
-        self.val_loss_flag  = val_loss_flag
 
         self.losses         = []
-        if self.val_loss_flag:
-            self.val_loss   = []
+
+        self.val_loss   = []
         
         os.makedirs(self.log_dir)
+        
+        self.logger         = initialize_logger(os.path.join(self.log_dir, "train.log"))
+        
         self.writer     = SummaryWriter(self.log_dir)
         try:
             dummy_input     = torch.randn(2, 3, input_shape[0], input_shape[1])
@@ -36,25 +47,19 @@ class LossHistory():
         except:
             pass
 
-    def append_loss(self, epoch, loss, val_loss = None):
+    def append_loss(self, epoch, loss, val_loss, lr):
         if not os.path.exists(self.log_dir):
             os.makedirs(self.log_dir)
 
         self.losses.append(loss)
-        if self.val_loss_flag:
-            self.val_loss.append(val_loss)
+
+        self.val_loss.append(val_loss)
         
-        with open(os.path.join(self.log_dir, "epoch_loss.txt"), 'a') as f:
-            f.write(str(loss))
-            f.write("\n")
-        if self.val_loss_flag:
-            with open(os.path.join(self.log_dir, "epoch_val_loss.txt"), 'a') as f:
-                f.write(str(val_loss))
-                f.write("\n")
+        self.logger.info("Epoch[%04d], Learning Rate : %.9f, Train Loss : %.9f, Val Loss : %.9f" % (epoch, lr, loss, val_loss))
             
         self.writer.add_scalar('loss', loss, epoch)
-        if self.val_loss_flag:
-            self.writer.add_scalar('val_loss', val_loss, epoch)
+
+        self.writer.add_scalar('val_loss', val_loss, epoch)
             
         self.loss_plot()
 
@@ -63,8 +68,8 @@ class LossHistory():
 
         plt.figure()
         plt.plot(iters, self.losses, 'red', linewidth = 2, label='train loss')
-        if self.val_loss_flag:
-            plt.plot(iters, self.val_loss, 'coral', linewidth = 2, label='val loss')
+
+        plt.plot(iters, self.val_loss, 'coral', linewidth = 2, label='val loss')
             
         try:
             if len(self.losses) < 25:
@@ -73,8 +78,8 @@ class LossHistory():
                 num = 15
             
             plt.plot(iters, scipy.signal.savgol_filter(self.losses, num, 3), 'green', linestyle = '--', linewidth = 2, label='smooth train loss')
-            if self.val_loss_flag:
-                plt.plot(iters, scipy.signal.savgol_filter(self.val_loss, num, 3), '#8B4513', linestyle = '--', linewidth = 2, label='smooth val loss')
+
+            plt.plot(iters, scipy.signal.savgol_filter(self.val_loss, num, 3), '#8B4513', linestyle = '--', linewidth = 2, label='smooth val loss')
         except:
             pass
 
@@ -163,7 +168,7 @@ class EvalCallback():
     def on_epoch_end(self, epoch, model_eval):
         if epoch % self.period == 0 and self.eval_flag:
             self.net    = model_eval
-            gt_dir      = os.path.join(self.dataset_path, "VOC2007/SegmentationClass/")
+            gt_dir      = os.path.join(self.dataset_path, "SegmentationClass/")
             pred_dir    = os.path.join(self.miou_out_path, 'detection-results')
             if not os.path.exists(self.miou_out_path):
                 os.makedirs(self.miou_out_path)
@@ -174,7 +179,7 @@ class EvalCallback():
                 #-------------------------------#
                 #   从文件中读取图像
                 #-------------------------------#
-                image_path  = os.path.join(self.dataset_path, "VOC2007/JPEGImages/"+image_id+".jpg")
+                image_path  = os.path.join(self.dataset_path, "JPEGImages/"+image_id+".jpg")
                 image       = Image.open(image_path)
                 #------------------------------#
                 #   获得预测txt

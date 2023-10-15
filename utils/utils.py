@@ -1,5 +1,5 @@
 import random
-
+import os
 import numpy as np
 import torch
 from PIL import Image
@@ -73,6 +73,29 @@ def show_config(**kwargs):
     for key, value in kwargs.items():
         print('|%25s | %40s|' % (str(key), str(value)))
     print('-' * 70)
+
+def print_options(opt):
+    """Print and save options
+
+    It will print both current options and default values(if different).
+    It will save options into a text file / [checkpoints_dir] / opt.txt
+    """
+    message = ''
+    message += '-' * 70
+    message += '\n'
+    message += '|%25s | %40s|\n' % ('keys', 'values')
+    message += '-' * 70
+    message += '\n'
+    for k, v in sorted(vars(opt).items()):
+        message += '|%25s | %40s|\n' % (str(k), str(v))
+    message += '-' * 70
+    print(message)
+    # save to the disk
+    file_name = os.path.join(opt.save_dir, 'opt.txt')
+    with open(file_name, 'wt') as opt_file:
+        opt_file.write(message)
+        opt_file.write('\n')
+        
 
 def download_weights(backbone, model_dir="./model_data"):
     import os
