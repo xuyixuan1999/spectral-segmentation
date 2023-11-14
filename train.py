@@ -374,8 +374,9 @@ if __name__ == "__main__":
 
             set_optimizer_lr(optimizer, lr_scheduler_func, epoch)
 
-            fit_one_epoch(opt, model_train, model, loss_history, eval_callback, optimizer, epoch, 
-                    epoch_step, epoch_step_val, gen, gen_val, opt.unfreeze_epoch, opt.cuda, dice_loss, focal_loss, cls_weights, opt.num_classes, opt.fp16, scaler, opt.save_period, opt.save_dir, local_rank)
+            fit_one_epoch(opt, model_train, model, loss_history, eval_callback, optimizer, 
+                          epoch, epoch_step, epoch_step_val, gen, gen_val, 
+                          dice_loss, focal_loss, cls_weights, scaler, local_rank)
 
             if opt.distributed:
                 dist.barrier()

@@ -8,7 +8,9 @@ from utils.utils import get_lr
 from utils.utils_metrics import f_score
 
 
-def fit_one_epoch(opt, model_train, model, loss_history, eval_callback, optimizer, epoch, epoch_step, epoch_step_val, gen, gen_val, Epoch, cuda, dice_loss, focal_loss, cls_weights, num_classes, fp16, scaler, save_period, save_dir, local_rank=0):
+def fit_one_epoch(opt, model_train, model, loss_history, eval_callback, optimizer, 
+                  epoch, epoch_step, epoch_step_val, gen, gen_val, 
+                  dice_loss, focal_loss, cls_weights, scaler, local_rank=0):
     total_loss      = 0
     total_f_score   = 0
 
@@ -17,7 +19,7 @@ def fit_one_epoch(opt, model_train, model, loss_history, eval_callback, optimize
 
     if local_rank == 0:
         print('Start Train')
-        pbar = tqdm(total=epoch_step,desc=f'Epoch {epoch + 1}/{Epoch}',postfix=dict,mininterval=0.3)
+        pbar = tqdm(total=epoch_step,desc=f'Epoch {epoch + 1}/{opt.unfreeze_epoch}',postfix=dict,mininterval=0.3)
     model_train.train()
     for iteration, batch in enumerate(gen):
         if iteration >= epoch_step: 
@@ -25,14 +27,14 @@ def fit_one_epoch(opt, model_train, model, loss_history, eval_callback, optimize
         imgs, pngs, labels = batch
         with torch.no_grad():
             weights = torch.from_numpy(cls_weights)
-            if cuda:
+            if opt.cuda:
                 imgs    = imgs.cuda(local_rank)
                 pngs    = pngs.cuda(local_rank)
                 labels  = labels.cuda(local_rank)
                 weights = weights.cuda(local_rank)
 
         optimizer.zero_grad()
-        if not fp16:
+        if not opt.fp16:
             #----------------------#
             #   前向传播
             #----------------------#
@@ -41,9 +43,9 @@ def fit_one_epoch(opt, model_train, model, loss_history, eval_callback, optimize
             #   损失计算
             #----------------------#
             if focal_loss:
-                loss = Focal_Loss(outputs, pngs, weights, num_classes = num_classes)
+                loss = Focal_Loss(outputs, pngs, weights, num_classes = opt.num_classes)
             else:
-                loss = CE_Loss(outputs, pngs, weights, num_classes = num_classes)
+                loss = CE_Loss(outputs, pngs, weights, num_classes = opt.num_classes)
 
             if dice_loss:
                 main_dice = Dice_loss(outputs, labels)
@@ -68,9 +70,9 @@ def fit_one_epoch(opt, model_train, model, loss_history, eval_callback, optimize
                 #   损失计算
                 #----------------------#
                 if focal_loss:
-                    loss = Focal_Loss(outputs, pngs, weights, num_classes = num_classes)
+                    loss = Focal_Loss(outputs, pngs, weights, num_classes = opt.num_classes)
                 else:
-                    loss = CE_Loss(outputs, pngs, weights, num_classes = num_classes)
+                    loss = CE_Loss(outputs, pngs, weights, num_classes = opt.num_classes)
 
                 if dice_loss:
                     main_dice = Dice_loss(outputs, labels)
@@ -102,7 +104,7 @@ def fit_one_epoch(opt, model_train, model, loss_history, eval_callback, optimize
         pbar.close()
         print('Finish Train')
         print('Start Validation')
-        pbar = tqdm(total=epoch_step_val, desc=f'Epoch {epoch + 1}/{Epoch}',postfix=dict,mininterval=0.3)
+        pbar = tqdm(total=epoch_step_val, desc=f'Epoch {epoch + 1}/{opt.unfreeze_epoch}',postfix=dict,mininterval=0.3)
 
     model_train.eval()
     for iteration, batch in enumerate(gen_val):
@@ -111,7 +113,7 @@ def fit_one_epoch(opt, model_train, model, loss_history, eval_callback, optimize
         imgs, pngs, labels = batch
         with torch.no_grad():
             weights = torch.from_numpy(cls_weights)
-            if cuda:
+            if opt.cuda:
                 imgs    = imgs.cuda(local_rank)
                 pngs    = pngs.cuda(local_rank)
                 labels  = labels.cuda(local_rank)
@@ -125,9 +127,9 @@ def fit_one_epoch(opt, model_train, model, loss_history, eval_callback, optimize
             #   损失计算
             #----------------------#
             if focal_loss:
-                loss = Focal_Loss(outputs, pngs, weights, num_classes = num_classes)
+                loss = Focal_Loss(outputs, pngs, weights, num_classes = opt.num_classes)
             else:
-                loss = CE_Loss(outputs, pngs, weights, num_classes = num_classes)
+                loss = CE_Loss(outputs, pngs, weights, num_classes = opt.num_classes)
 
             if dice_loss:
                 main_dice = Dice_loss(outputs, labels)
@@ -154,20 +156,20 @@ def fit_one_epoch(opt, model_train, model, loss_history, eval_callback, optimize
             eval_callback.on_epoch_end_rgb(epoch + 1, model_train)
         else:
             eval_callback.on_epoch_end_mat(epoch + 1, model_train)
-        print('Epoch:'+ str(epoch+1) + '/' + str(Epoch))
+        print('Epoch:'+ str(epoch+1) + '/' + str(opt.unfreeze_epoch))
         print('Total Loss: %.5f || Val Loss: %.5f ' % (total_loss / epoch_step, val_loss / epoch_step_val))
         
         #-----------------------------------------------#
         #   保存权值
         #-----------------------------------------------#
-        if (epoch + 1) % save_period == 0 or epoch + 1 == Epoch:
-            torch.save(model.state_dict(), os.path.join(save_dir, 'ep%03d-loss%.3f-val_loss%.3f.pth'%((epoch + 1), total_loss / epoch_step, val_loss / epoch_step_val)))
+        if (epoch + 1) % opt.save_period == 0 or epoch + 1 == opt.unfreeze_epoch:
+            torch.save(model.state_dict(), os.path.join(opt.save_dir, 'ep%03d-loss%.3f-val_loss%.3f.pth'%((epoch + 1), total_loss / epoch_step, val_loss / epoch_step_val)))
 
         if len(loss_history.val_loss) <= 1 or (val_loss / epoch_step_val) <= min(loss_history.val_loss):
             print('Save best model to best_epoch_weights.pth')
-            torch.save(model.state_dict(), os.path.join(save_dir, "best_epoch_weights.pth"))
+            torch.save(model.state_dict(), os.path.join(opt.save_dir, "best_epoch_weights.pth"))
             
-        torch.save(model.state_dict(), os.path.join(save_dir, "last_epoch_weights.pth"))
+        torch.save(model.state_dict(), os.path.join(opt.save_dir, "last_epoch_weights.pth"))
 
 def fit_one_epoch_no_val(model_train, model, loss_history, optimizer, epoch, epoch_step, gen, Epoch, cuda, dice_loss, focal_loss, cls_weights, num_classes, fp16, scaler, save_period, save_dir, local_rank=0):
     total_loss      = 0
