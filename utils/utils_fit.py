@@ -8,7 +8,7 @@ from utils.utils import get_lr
 from utils.utils_metrics import f_score
 
 
-def fit_one_epoch(model_train, model, loss_history, eval_callback, optimizer, epoch, epoch_step, epoch_step_val, gen, gen_val, Epoch, cuda, dice_loss, focal_loss, cls_weights, num_classes, fp16, scaler, save_period, save_dir, local_rank=0):
+def fit_one_epoch(opt, model_train, model, loss_history, eval_callback, optimizer, epoch, epoch_step, epoch_step_val, gen, gen_val, Epoch, cuda, dice_loss, focal_loss, cls_weights, num_classes, fp16, scaler, save_period, save_dir, local_rank=0):
     total_loss      = 0
     total_f_score   = 0
 
@@ -150,9 +150,12 @@ def fit_one_epoch(model_train, model, loss_history, eval_callback, optimizer, ep
         pbar.close()
         print('Finish Validation')
         loss_history.append_loss(epoch + 1, total_loss/ epoch_step, val_loss/ epoch_step_val, get_lr(optimizer))
-        eval_callback.on_epoch_end(epoch + 1, model_train)
+        if opt.input_shape[0] == 3:
+            eval_callback.on_epoch_end_rgb(epoch + 1, model_train)
+        else:
+            eval_callback.on_epoch_end_mat(epoch + 1, model_train)
         print('Epoch:'+ str(epoch+1) + '/' + str(Epoch))
-        print('Total Loss: %.3f || Val Loss: %.3f ' % (total_loss / epoch_step, val_loss / epoch_step_val))
+        print('Total Loss: %.5f || Val Loss: %.5f ' % (total_loss / epoch_step, val_loss / epoch_step_val))
         
         #-----------------------------------------------#
         #   保存权值

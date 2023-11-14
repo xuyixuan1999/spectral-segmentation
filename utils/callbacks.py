@@ -12,11 +12,12 @@ import cv2
 import shutil
 import numpy as np
 import logging
+import h5py
 
 from PIL import Image
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
-from .utils import cvtColor, preprocess_input, resize_image
+from .utils import cvtColor, preprocess_input, resize_image, resize_mat
 from .utils_metrics import compute_mIoU
 
 def initialize_logger(file_dir):
@@ -42,7 +43,7 @@ class LossHistory():
         
         self.writer     = SummaryWriter(self.log_dir)
         try:
-            dummy_input     = torch.randn(2, 3, input_shape[0], input_shape[1])
+            dummy_input     = torch.randn(2, input_shape[0], input_shape[1], input_shape[2])
             self.writer.add_graph(model, dummy_input)
         except:
             pass
@@ -95,7 +96,7 @@ class LossHistory():
 
 class EvalCallback():
     def __init__(self, net, input_shape, num_classes, image_ids, dataset_path, log_dir, cuda, \
-            miou_out_path=".temp_miou_out", eval_flag=True, period=1):
+            miou_out_path=".temp_miou_out", eval_flag=True, period=1, in_channels=3):
         super(EvalCallback, self).__init__()
         
         self.net                = net
@@ -213,3 +214,223 @@ class EvalCallback():
 
             print("Get miou done.")
             shutil.rmtree(self.miou_out_path)
+            
+    def on_epoch_end_mat(self, epoch, model_eval):
+        if epoch % self.period == 0 and self.eval_flag:
+            self.net    = model_eval
+            gt_dir      = os.path.join(self.dataset_path, "SegmentationClass/")
+            pred_dir    = os.path.join(self.miou_out_path, 'detection-results')
+            if not os.path.exists(self.miou_out_path):
+                os.makedirs(self.miou_out_path)
+            if not os.path.exists(pred_dir):
+                os.makedirs(pred_dir)
+            print("Get miou.")
+            for image_id in tqdm(self.image_ids):
+                #-------------------------------#
+                #   从文件中读取图像
+                #-------------------------------#
+                # image_path  = os.path.join(self.dataset_path, "JPEGImages/"+image_id+".jpg")
+                mat_path = os.path.join(self.dataset_path, "Train_Spec/" + image_id + ".mat")
+                with h5py.File(mat_path, 'r') as mat:
+                    hyper = np.float32(np.array(mat['cube']))
+                image = np.transpose(hyper, (2, 1, 0))
+                
+                # mask 
+                mask = cv2.imread(os.path.join(self.dataset_path, "Train_Mask", image_id + ".png"), 0)
+                mask = np.expand_dims(mask, axis=0)
+                mask = np.broadcast_to(mask, (image.shape[0], mask.shape[1], mask.shape[2]))
+                image = np.where(mask > 0, 0, image)
+                #------------------------------#
+                #   获得预测txt
+                #------------------------------#
+                image       = self.get_miou_mat(image)
+                image.save(os.path.join(pred_dir, image_id + ".png"))
+                        
+            print("Calculate miou.")
+            _, IoUs, _, _ = compute_mIoU(gt_dir, pred_dir, self.image_ids, self.num_classes, None)  # 执行计算mIoU的函数
+            temp_miou = np.nanmean(IoUs) * 100
+
+            self.mious.append(temp_miou)
+            self.epoches.append(epoch)
+
+            with open(os.path.join(self.log_dir, "epoch_miou.txt"), 'a') as f:
+                f.write(str(temp_miou))
+                f.write("\n")
+            
+            plt.figure()
+            plt.plot(self.epoches, self.mious, 'red', linewidth = 2, label='train miou')
+
+            plt.grid(True)
+            plt.xlabel('Epoch')
+            plt.ylabel('Miou')
+            plt.title('A Miou Curve')
+            plt.legend(loc="upper right")
+
+            plt.savefig(os.path.join(self.log_dir, "epoch_miou.png"))
+            plt.cla()
+            plt.close("all")
+
+            print("Get miou done.")
+            shutil.rmtree(self.miou_out_path)
+            
+    def get_miou_mat(self, image):
+        
+        #---------------------------------------------------------#
+        #   在这里将图像转换成RGB图像，防止灰度图在预测时报错。
+        #   代码仅仅支持RGB图像的预测，所有其它类型的图像都会转化成RGB
+        #---------------------------------------------------------#
+        # image [c, h, w]
+        image = np.transpose(image, [1, 2, 0]) # [h, w, c]
+        image = (image - np.min(image)) / (np.max(image) - np.min(image))
+        image = (image * 255).astype(np.uint8)
+        
+        orininal_h  = np.array(image).shape[0]
+        orininal_w  = np.array(image).shape[1]
+        #---------------------------------------------------------#
+        #   给图像增加灰条，实现不失真的resize
+        #   也可以直接resize进行识别
+        #---------------------------------------------------------#
+        image_data, nw, nh  = resize_mat(image, (self.input_shape[1], self.input_shape[0]))
+        #---------------------------------------------------------#
+        #   添加上batch_size维度
+        #---------------------------------------------------------#
+        image_data  = np.expand_dims(np.transpose(np.array(image_data, np.float32) / 255.0, (2, 0, 1)), 0)
+
+        with torch.no_grad():
+            images = torch.from_numpy(image_data)
+            if self.cuda:
+                images = images.cuda()
+                
+            #---------------------------------------------------#
+            #   图片传入网络进行预测
+            #---------------------------------------------------#
+            pr = self.net(images)[0]
+            #---------------------------------------------------#
+            #   取出每一个像素点的种类
+            #---------------------------------------------------#
+            pr = F.softmax(pr.permute(1,2,0),dim = -1).cpu().numpy()
+            #--------------------------------------#
+            #   将灰条部分截取掉
+            #--------------------------------------#
+            pr = pr[int((self.input_shape[0] - nh) // 2) : int((self.input_shape[0] - nh) // 2 + nh), \
+                    int((self.input_shape[1] - nw) // 2) : int((self.input_shape[1] - nw) // 2 + nw)]
+            #---------------------------------------------------#
+            #   进行图片的resize
+            #---------------------------------------------------#
+            pr = cv2.resize(pr, (orininal_w, orininal_h), interpolation = cv2.INTER_LINEAR)
+            #---------------------------------------------------#
+            #   取出每一个像素点的种类
+            #---------------------------------------------------#
+            pr = pr.argmax(axis=-1)
+    
+        image = Image.fromarray(np.uint8(pr))
+        return image
+
+    def on_epoch_end_rgb(self, epoch, model_eval):
+        if epoch % self.period == 0 and self.eval_flag:
+            self.net    = model_eval
+            gt_dir      = os.path.join(self.dataset_path, "SegmentationClass/")
+            pred_dir    = os.path.join(self.miou_out_path, 'detection-results')
+            if not os.path.exists(self.miou_out_path):
+                os.makedirs(self.miou_out_path)
+            if not os.path.exists(pred_dir):
+                os.makedirs(pred_dir)
+            print("Get miou.")
+            for image_id in tqdm(self.image_ids):
+                #-------------------------------#
+                #   从文件中读取图像
+                #-------------------------------#
+                # image_path  = os.path.join(self.dataset_path, "JPEGImages/"+image_id+".jpg")
+                rgb_path = os.path.join(self.dataset_path, "JPEGImages/" + image_id + ".jpg")
+                image = np.array(Image.open(rgb_path), dtype=np.uint8)
+                
+                # mask 
+                mask = cv2.imread(os.path.join(self.dataset_path, "Train_Mask", image_id + ".png"), 0)
+                mask = np.expand_dims(mask, axis=2)
+                mask = np.broadcast_to(mask, (image.shape[0], mask.shape[1], mask.shape[2]))
+                image = np.where(mask > 0, 128, image)
+                #------------------------------#
+                #   获得预测txt
+                #------------------------------#
+                image       = self.get_miou_rgb(image)
+                image.save(os.path.join(pred_dir, image_id + ".png"))
+                        
+            print("Calculate miou.")
+            _, IoUs, _, _ = compute_mIoU(gt_dir, pred_dir, self.image_ids, self.num_classes, None)  # 执行计算mIoU的函数
+            temp_miou = np.nanmean(IoUs) * 100
+
+            self.mious.append(temp_miou)
+            self.epoches.append(epoch)
+
+            with open(os.path.join(self.log_dir, "epoch_miou.txt"), 'a') as f:
+                f.write(str(temp_miou))
+                f.write("\n")
+            
+            plt.figure()
+            plt.plot(self.epoches, self.mious, 'red', linewidth = 2, label='train miou')
+
+            plt.grid(True)
+            plt.xlabel('Epoch')
+            plt.ylabel('Miou')
+            plt.title('A Miou Curve')
+            plt.legend(loc="upper right")
+
+            plt.savefig(os.path.join(self.log_dir, "epoch_miou.png"))
+            plt.cla()
+            plt.close("all")
+
+            print("Get miou done.")
+            shutil.rmtree(self.miou_out_path)
+            
+    def get_miou_rgb(self, image):
+        
+        #---------------------------------------------------------#
+        #   在这里将图像转换成RGB图像，防止灰度图在预测时报错。
+        #   代码仅仅支持RGB图像的预测，所有其它类型的图像都会转化成RGB
+        #---------------------------------------------------------#
+        # image [h, w, c]
+        # image = np.transpose(image, [1, 2, 0]) # [h, w, c]
+        # image = (image - np.min(image)) / (np.max(image) - np.min(image))
+        # image = (image * 255).astype(np.uint8)
+        
+        orininal_h  = np.array(image).shape[0]
+        orininal_w  = np.array(image).shape[1]
+        #---------------------------------------------------------#
+        #   给图像增加灰条，实现不失真的resize
+        #   也可以直接resize进行识别
+        #---------------------------------------------------------#
+        image_data, nw, nh  = resize_mat(image, (self.input_shape[1], self.input_shape[0]))
+        #---------------------------------------------------------#
+        #   添加上batch_size维度
+        #---------------------------------------------------------#
+        image_data  = np.expand_dims(np.transpose(np.array(image_data, np.float32) / 255.0, (2, 0, 1)), 0)
+
+        with torch.no_grad():
+            images = torch.from_numpy(image_data)
+            if self.cuda:
+                images = images.cuda()
+                
+            #---------------------------------------------------#
+            #   图片传入网络进行预测
+            #---------------------------------------------------#
+            pr = self.net(images)[0]
+            #---------------------------------------------------#
+            #   取出每一个像素点的种类
+            #---------------------------------------------------#
+            pr = F.softmax(pr.permute(1,2,0),dim = -1).cpu().numpy()
+            #--------------------------------------#
+            #   将灰条部分截取掉
+            #--------------------------------------#
+            pr = pr[int((self.input_shape[0] - nh) // 2) : int((self.input_shape[0] - nh) // 2 + nh), \
+                    int((self.input_shape[1] - nw) // 2) : int((self.input_shape[1] - nw) // 2 + nw)]
+            #---------------------------------------------------#
+            #   进行图片的resize
+            #---------------------------------------------------#
+            pr = cv2.resize(pr, (orininal_w, orininal_h), interpolation = cv2.INTER_LINEAR)
+            #---------------------------------------------------#
+            #   取出每一个像素点的种类
+            #---------------------------------------------------#
+            pr = pr.argmax(axis=-1)
+    
+        image = Image.fromarray(np.uint8(pr))
+        return image

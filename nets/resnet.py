@@ -98,7 +98,7 @@ class Bottleneck(nn.Module):
 
 
 class ResNet(nn.Module):
-    def __init__(self, block, layers, num_classes=1000):
+    def __init__(self, block, layers, in_channels=3, num_classes=1000):
         #-----------------------------------------------------------#
         #   假设输入图像为600,600,3
         #   当我们使用resnet50的时候
@@ -106,7 +106,7 @@ class ResNet(nn.Module):
         self.inplanes = 64
         super(ResNet, self).__init__()
         # 600,600,3 -> 300,300,64
-        self.conv1  = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        self.conv1  = nn.Conv2d(in_channels, 64, kernel_size=7, stride=2, padding=3, bias=False)
         self.bn1    = nn.BatchNorm2d(64)
         self.relu   = nn.ReLU(inplace=True)
         # 300,300,64 -> 150,150,64
@@ -175,11 +175,74 @@ class ResNet(nn.Module):
         feat5   = self.layer4(feat4)
         return [feat1, feat2, feat3, feat4, feat5]
 
-def resnet50(pretrained=False, **kwargs):
-    model = ResNet(Bottleneck, [3, 4, 6, 3], **kwargs)
+def resnet50(pretrained=False, in_channels=3, **kwargs):
+    model = ResNet(Bottleneck, [3, 4, 6, 3], in_channels, **kwargs)
     if pretrained:
-        model.load_state_dict(model_zoo.load_url('https://s3.amazonaws.com/pytorch/models/resnet50-19c8e357.pth', model_dir='model_data'), strict=False)
+        state_dict = model_zoo.load_url('https://download.pytorch.org/models/resnet50-0676ba61.pth', model_dir='model_data')
+        state_dict = {k: v for k, v in state_dict.items() if (k in model.state_dict()) and (v.size() == model.state_dict()[k].size())}
+        model_dict = model.state_dict()
+        model_dict.update(state_dict)
+        model.load_state_dict(model_dict)
+        
+    del model.avgpool
+    del model.fc
+    return model
+
+def resnet18(pretrained=False, in_channels=3, **kwargs):
+    model = ResNet(BasicBlock, [2, 2, 2, 2], in_channels, **kwargs)
+    if pretrained:
+        state_dict = model_zoo.load_url('https://download.pytorch.org/models/resnet18-f37072fd.pth', model_dir='model_data')
+        state_dict = {k: v for k, v in state_dict.items() if (k in model.state_dict()) and (v.size() == model.state_dict()[k].size())}
+        model_dict = model.state_dict()
+        model_dict.update(state_dict)
+        model.load_state_dict(model_dict)
+        
+    del model.avgpool
+    del model.fc
+    return model
+
+def resnet34(pretrained=False, in_channels=3, **kwargs):
+    model = ResNet(BasicBlock, [3, 4, 6, 3], in_channels, **kwargs)
+    if pretrained:
+        state_dict = model_zoo.load_url('https://download.pytorch.org/models/resnet34-b627a593.pth', model_dir='model_data')
+        state_dict = {k: v for k, v in state_dict.items() if (k in model.state_dict()) and (v.size() == model.state_dict()[k].size())}
+        model_dict = model.state_dict()
+        model_dict.update(state_dict)
+        model.load_state_dict(model_dict)
+        
+    del model.avgpool
+    del model.fc
+    return model
+
+def resnet(type='resnet50', pretrained=False, in_channels=3, **kwargs):
+    if type == 'resnet50':
+        model = ResNet(Bottleneck, [3, 4, 6, 3], in_channels)
+        if pretrained:
+            state_dict = model_zoo.load_url('https://download.pytorch.org/models/resnet50-0676ba61.pth', model_dir='model_data')
+    elif type == 'resnet18':
+        model = ResNet(BasicBlock, [2, 2, 2, 2], in_channels)
+        if pretrained:
+            state_dict = model_zoo.load_url('https://download.pytorch.org/models/resnet18-f37072fd.pth', model_dir='model_data')
+    elif type == 'resnet34':
+        model = ResNet(BasicBlock, [3, 4, 6, 3], in_channels)
+        if pretrained:
+            state_dict = model_zoo.load_url('https://download.pytorch.org/models/resnet34-b627a593.pth', model_dir='model_data')
+    else:
+        raise ValueError('Unknown model type: {}'.format)
+    
+    state_dict = {k: v for k, v in state_dict.items() if (k in model.state_dict()) and (v.size() == model.state_dict()[k].size())}
+    model_dict = model.state_dict()
+    model_dict.update(state_dict)
+    model.load_state_dict(model_dict)
     
     del model.avgpool
     del model.fc
     return model
+    
+        
+if __name__ == "__main__":
+    import torch
+    model = resnet50(pretrained=True, in_channels=4)
+    dummy_input = torch.rand(1, 4, 224, 224)
+    output = model(dummy_input)
+

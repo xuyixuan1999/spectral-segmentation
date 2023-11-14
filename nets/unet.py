@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-from nets.resnet import resnet50
+from nets.resnet import resnet50, resnet34, resnet18
 from nets.vgg import VGG16
 
 
@@ -11,6 +11,7 @@ class unetUp(nn.Module):
         self.conv1  = nn.Conv2d(in_size, out_size, kernel_size = 3, padding = 1)
         self.conv2  = nn.Conv2d(out_size, out_size, kernel_size = 3, padding = 1)
         self.up     = nn.UpsamplingBilinear2d(scale_factor = 2)
+        # self.up = nn.ConvTranspose2d(in_size-out_size, in_size-out_size, kernel_size = 3, stride = 2, padding = 1, output_padding = 1)
         self.relu   = nn.ReLU(inplace = True)
 
     def forward(self, inputs1, inputs2):
@@ -22,14 +23,24 @@ class unetUp(nn.Module):
         return outputs
 
 class Unet(nn.Module):
-    def __init__(self, num_classes = 21, pretrained = False, backbone = 'vgg'):
+    def __init__(self, num_classes = 21, pretrained = False, backbone = 'vgg', in_channels=3):
         super(Unet, self).__init__()
         if backbone == 'vgg':
-            self.vgg    = VGG16(pretrained = pretrained)
+            self.vgg    = VGG16(pretrained = pretrained, in_channels=in_channels)
             in_filters  = [192, 384, 768, 1024]
+            self.backbone = 'vgg'
         elif backbone == "resnet50":
-            self.resnet = resnet50(pretrained = pretrained)
+            self.resnet = resnet50(pretrained = pretrained, in_channels=in_channels)
             in_filters  = [192, 512, 1024, 3072]
+            self.backbone = 'resnet50'
+        elif backbone == "resnet34":
+            self.resnet = resnet34(pretrained = pretrained, in_channels=in_channels)
+            in_filters = [192, 320, 640, 768]
+            self.backbone = 'resnet34'
+        elif backbone == "resnet18":
+            self.resnet = resnet18(pretrained = pretrained, in_channels=in_channels)
+            in_filters = [192, 320, 640, 768]
+            self.backbone = 'resnet18'
         else:
             raise ValueError('Unsupported backbone - `{}`, Use vgg, resnet50.'.format(backbone))
         out_filters = [64, 128, 256, 512]
@@ -44,7 +55,7 @@ class Unet(nn.Module):
         # 512,512,64
         self.up_concat1 = unetUp(in_filters[0], out_filters[0])
 
-        if backbone == 'resnet50':
+        if "resnet" in self.backbone:
             self.up_conv = nn.Sequential(
                 nn.UpsamplingBilinear2d(scale_factor = 2), 
                 nn.Conv2d(out_filters[0], out_filters[0], kernel_size = 3, padding = 1),
@@ -57,12 +68,12 @@ class Unet(nn.Module):
 
         self.final = nn.Conv2d(out_filters[0], num_classes, 1)
 
-        self.backbone = backbone
+        # self.backbone = backbone
 
     def forward(self, inputs):
         if self.backbone == "vgg":
             [feat1, feat2, feat3, feat4, feat5] = self.vgg.forward(inputs)
-        elif self.backbone == "resnet50":
+        if 'resnet' in self.backbone:
             [feat1, feat2, feat3, feat4, feat5] = self.resnet.forward(inputs)
 
         up4 = self.up_concat4(feat4, feat5)
@@ -81,7 +92,7 @@ class Unet(nn.Module):
         if self.backbone == "vgg":
             for param in self.vgg.parameters():
                 param.requires_grad = False
-        elif self.backbone == "resnet50":
+        if 'resnet' in self.backbone:
             for param in self.resnet.parameters():
                 param.requires_grad = False
 
@@ -89,6 +100,6 @@ class Unet(nn.Module):
         if self.backbone == "vgg":
             for param in self.vgg.parameters():
                 param.requires_grad = True
-        elif self.backbone == "resnet50":
+        if 'resnet' in self.backbone:
             for param in self.resnet.parameters():
                 param.requires_grad = True

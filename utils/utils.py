@@ -3,6 +3,7 @@ import os
 import numpy as np
 import torch
 from PIL import Image
+import cv2
 
 
 #---------------------------------------------------------#
@@ -32,6 +33,36 @@ def resize_image(image, size):
     new_image.paste(image, ((w-nw)//2, (h-nh)//2))
 
     return new_image, nw, nh
+
+def resize_mat(mat, size):
+    # mat [h, w, c]
+    ih, iw, ic  = mat.shape
+    w, h    = size
+    
+    scale   = min(w/iw, h/ih)
+    nw      = int(iw*scale)
+    nh      = int(ih*scale)
+    dx = (w-nw)//2
+    dy = (h-nh)//2
+    # resize multichannel
+    mat = resize_multichannel_image(mat, (nh, nw))
+    new_mat = np.ones((h, w, ic), dtype=mat.dtype) * 128
+    new_mat[dy:dy+nh, dx:dx+nw, :] = mat
+    return new_mat, nw, nh
+    
+def resize_multichannel_image(image, target_size):
+    # 获取输入图像的高度、宽度和通道数
+    h, w, c = image.shape
+    
+    # 创建一个与目标大小相同的空图像
+    resized_image = np.zeros((target_size[0], target_size[1], c), dtype=image.dtype)
+    
+    for channel in range(c):
+        channel_image = image[:, :, channel]
+        resized_channel = cv2.resize(channel_image, (target_size[1], target_size[0]))
+        resized_image[:, :, channel] = resized_channel
+
+    return resized_image
     
 #---------------------------------------------------#
 #   获得学习率

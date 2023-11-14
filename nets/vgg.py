@@ -68,8 +68,16 @@ def VGG16(pretrained, in_channels = 3, **kwargs):
     model = VGG(make_layers(cfgs["D"], batch_norm = False, in_channels = in_channels), **kwargs)
     if pretrained:
         state_dict = load_state_dict_from_url("https://download.pytorch.org/models/vgg16-397923af.pth", model_dir="./model_data")
-        model.load_state_dict(state_dict)
+        # match the keys
+        state_dict = {k: v for k, v in state_dict.items() if (k in model.state_dict()) and (v.size() == model.state_dict()[k].size())}
+        model_dict = model.state_dict()
+        model_dict.update(state_dict)
+        model.load_state_dict(model_dict)
     
     del model.avgpool
     del model.classifier
     return model
+
+if __name__ == "__main__":
+    model = VGG16(True, in_channels=25)
+    

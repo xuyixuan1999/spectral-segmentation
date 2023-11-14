@@ -13,7 +13,8 @@ from torch.utils.data import DataLoader
 from nets.unet import Unet
 from nets.unet_training import get_lr_scheduler, set_optimizer_lr, weights_init
 from utils.callbacks import EvalCallback, LossHistory
-from utils.dataloader import UnetDataset, unet_dataset_collate
+# from utils.dataloader import UnetDataset, unet_dataset_collate
+from utils.dataloader_mat import UnetDatasetMat, image_dataset_collate, UnetDatasetRGB
 from utils.utils import seed_everything, worker_init_fn, print_options
 from utils.utils_fit import fit_one_epoch
 
@@ -25,7 +26,7 @@ parser.add_argument('--distributed', action='store_true', default=False, help='U
 parser.add_argument('--sync_bn', action='store_true', default=False, help='Use sync batch norm')
 parser.add_argument('--fp16', action='store_true', default=False, help='Use fp16 training')
 parser.add_argument('--num_classes', type=int, default=21, help='num classes')
-parser.add_argument('--backbone',choices=['vgg', 'resnet50'], default='vgg', help='backbone')
+parser.add_argument('--backbone',choices=['vgg', 'resnet50', 'resnet34', 'resnet18'], default='vgg', help='backbone')
 parser.add_argument('--pretrained_model_path', type=str, default=None, help='pretrained model path')
 parser.add_argument('--input_shape', type=int, nargs='+', default=[512, 512], help='Input image shape (width and height)')
 parser.add_argument('--init_epoch', type=int, default=0, help='Init Epoch')
@@ -138,7 +139,7 @@ if __name__ == "__main__":
     cls_weights     = np.ones([opt.num_classes], np.float32)
     
     sync_bn         = False
-    pretrained  = False
+    pretrained  = True
     
 
     seed_everything(opt.seed)
@@ -158,7 +159,7 @@ if __name__ == "__main__":
         local_rank      = 0
         rank            = 0
 
-    model = Unet(num_classes=opt.num_classes, pretrained=pretrained, backbone=opt.backbone).train()
+    model = Unet(num_classes=opt.num_classes, pretrained=pretrained, backbone=opt.backbone, in_channels=opt.input_shape[0]).train()
     
     if not pretrained:
         weights_init(model)
@@ -289,8 +290,14 @@ if __name__ == "__main__":
         if epoch_step == 0 or epoch_step_val == 0:
             raise ValueError("数据集过小,无法继续进行训练,请扩充数据集。")
 
-        train_dataset   = UnetDataset(train_lines, opt.input_shape, opt.num_classes, True, opt.dataset_root)
-        val_dataset     = UnetDataset(val_lines, opt.input_shape, opt.num_classes, False, opt.dataset_root)
+        # train_dataset   = UnetDataset(train_lines, opt.input_shape, opt.num_classes, True, opt.dataset_root)
+        # val_dataset     = UnetDataset(val_lines, opt.input_shape, opt.num_classes, False, opt.dataset_root)
+        if opt.input_shape[0] == 3:
+            train_dataset   = UnetDatasetRGB(train_lines, opt.input_shape[1:3], opt.num_classes, True, opt.dataset_root)
+            val_dataset     = UnetDatasetRGB(val_lines, opt.input_shape[1:3], opt.num_classes, False, opt.dataset_root)
+        else:
+            train_dataset   = UnetDatasetMat(train_lines, opt.input_shape[1:3], opt.num_classes, True, opt.dataset_root)
+            val_dataset     = UnetDatasetMat(val_lines, opt.input_shape[1:3], opt.num_classes, False, opt.dataset_root)
         
         if opt.distributed:
             train_sampler   = torch.utils.data.distributed.DistributedSampler(train_dataset, shuffle=True,)
@@ -303,17 +310,17 @@ if __name__ == "__main__":
             shuffle         = True
 
         gen             = DataLoader(train_dataset, shuffle = shuffle, batch_size = batch_size, num_workers = opt.num_workers, pin_memory=True,
-                                    drop_last = True, collate_fn = unet_dataset_collate, sampler=train_sampler, 
+                                    drop_last = True, collate_fn = image_dataset_collate, sampler=train_sampler, 
                                     worker_init_fn=partial(worker_init_fn, rank=rank, seed=opt.seed))
         gen_val         = DataLoader(val_dataset  , shuffle = shuffle, batch_size = batch_size, num_workers = opt.num_workers, pin_memory=True, 
-                                    drop_last = True, collate_fn = unet_dataset_collate, sampler=val_sampler, 
+                                    drop_last = True, collate_fn = image_dataset_collate, sampler=val_sampler, 
                                     worker_init_fn=partial(worker_init_fn, rank=rank, seed=opt.seed))
         
         #----------------------#
         #   记录eval的map曲线
         #----------------------#
         if local_rank == 0:
-            eval_callback   = EvalCallback(model, opt.input_shape, opt.num_classes, val_lines, opt.dataset_root, opt.save_dir, opt.cuda, \
+            eval_callback   = EvalCallback(model, opt.input_shape[1:3], opt.num_classes, val_lines, opt.dataset_root, opt.save_dir, opt.cuda, \
                                             eval_flag=opt.eval_flag, period=opt.eval_period)
         else:
             eval_callback   = None
@@ -354,10 +361,10 @@ if __name__ == "__main__":
                     batch_size = batch_size // ngpus_per_node
 
                 gen             = DataLoader(train_dataset, shuffle = shuffle, batch_size = batch_size, num_workers = opt.num_workers, pin_memory=True,
-                                            drop_last = True, collate_fn = unet_dataset_collate, sampler=train_sampler, 
+                                            drop_last = True, collate_fn = image_dataset_collate, sampler=train_sampler, 
                                             worker_init_fn=partial(worker_init_fn, rank=rank, seed=opt.seed))
                 gen_val         = DataLoader(val_dataset  , shuffle = shuffle, batch_size = batch_size, num_workers = opt.num_workers, pin_memory=True, 
-                                            drop_last = True, collate_fn = unet_dataset_collate, sampler=val_sampler, 
+                                            drop_last = True, collate_fn = image_dataset_collate, sampler=val_sampler, 
                                             worker_init_fn=partial(worker_init_fn, rank=rank, seed=opt.seed))
 
                 Unfreeze_flag = True
@@ -367,7 +374,7 @@ if __name__ == "__main__":
 
             set_optimizer_lr(optimizer, lr_scheduler_func, epoch)
 
-            fit_one_epoch(model_train, model, loss_history, eval_callback, optimizer, epoch, 
+            fit_one_epoch(opt, model_train, model, loss_history, eval_callback, optimizer, epoch, 
                     epoch_step, epoch_step_val, gen, gen_val, opt.unfreeze_epoch, opt.cuda, dice_loss, focal_loss, cls_weights, opt.num_classes, opt.fp16, scaler, opt.save_period, opt.save_dir, local_rank)
 
             if opt.distributed:
