@@ -4,7 +4,27 @@ import numpy as np
 import torch
 from PIL import Image
 import cv2
+import time
 
+class Timer():
+    def __init__(self, start_epoch, end_epoch):
+        self.epoch = start_epoch + 1
+        self.set_epoch = 1
+        self.n_epochs = end_epoch
+        self.prev_time = time.time()
+        self.mean_preiod = 0
+        
+    def log(self):
+        time_consumed = (time.time()-self.prev_time)
+        self.mean_preiod += time_consumed
+        self.prev_time = time.time()
+        epoch_done = self.set_epoch
+        epoch_left = self.n_epochs - self.epoch
+        pre_time = epoch_left*self.mean_preiod/epoch_done
+        self.set_epoch += 1
+        self.epoch += 1
+        return time_consumed, pre_time
+        
 
 #---------------------------------------------------------#
 #   将图像转换成RGB图像，防止灰度图在预测时报错。

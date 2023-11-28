@@ -242,7 +242,7 @@ def resnet(type='resnet50', pretrained=False, in_channels=3, **kwargs):
         
 if __name__ == "__main__":
     import torch
-    model = resnet50(pretrained=True, in_channels=4)
+    model = resnet18(pretrained=True, in_channels=4)
     dummy_input = torch.rand(1, 4, 224, 224)
     output = model(dummy_input)
 

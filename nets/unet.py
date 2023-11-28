@@ -3,6 +3,7 @@ import torch.nn as nn
 
 from nets.resnet import resnet50, resnet34, resnet18
 from nets.vgg import VGG16
+from nets.efficientvit import EfficientViTs, EfficientViTs_m0
 
 
 class unetUp(nn.Module):
@@ -41,6 +42,10 @@ class Unet(nn.Module):
             self.resnet = resnet18(pretrained = pretrained, in_channels=in_channels)
             in_filters = [192, 320, 640, 768]
             self.backbone = 'resnet18'
+        elif backbone == 'efficientvit':
+            self.efficientvit = EfficientViTs(in_chans=in_channels, **EfficientViTs_m0)
+            in_filters = [192, 320, 640, 768]
+            self.backbone = 'efficientvit'
         else:
             raise ValueError('Unsupported backbone - `{}`, Use vgg, resnet50.'.format(backbone))
         out_filters = [64, 128, 256, 512]
@@ -55,7 +60,7 @@ class Unet(nn.Module):
         # 512,512,64
         self.up_concat1 = unetUp(in_filters[0], out_filters[0])
 
-        if "resnet" in self.backbone:
+        if "resnet" in self.backbone or 'efficientvit' in self.backbone:
             self.up_conv = nn.Sequential(
                 nn.UpsamplingBilinear2d(scale_factor = 2), 
                 nn.Conv2d(out_filters[0], out_filters[0], kernel_size = 3, padding = 1),
@@ -75,6 +80,8 @@ class Unet(nn.Module):
             [feat1, feat2, feat3, feat4, feat5] = self.vgg.forward(inputs)
         if 'resnet' in self.backbone:
             [feat1, feat2, feat3, feat4, feat5] = self.resnet.forward(inputs)
+        if self.backbone == "efficientvit":
+            [feat1, feat2, feat3, feat4, feat5] = self.efficientvit.forward(inputs)
 
         up4 = self.up_concat4(feat4, feat5)
         up3 = self.up_concat3(feat3, up4)
@@ -95,6 +102,9 @@ class Unet(nn.Module):
         if 'resnet' in self.backbone:
             for param in self.resnet.parameters():
                 param.requires_grad = False
+        if 'efficientvit' in self.backbone:
+            for param in self.efficientvit.parameters():
+                param.requires_grad = False
 
     def unfreeze_backbone(self):
         if self.backbone == "vgg":
@@ -102,4 +112,7 @@ class Unet(nn.Module):
                 param.requires_grad = True
         if 'resnet' in self.backbone:
             for param in self.resnet.parameters():
+                param.requires_grad = True
+        if 'efficientvit' in self.backbone:
+            for param in self.efficientvit.parameters():
                 param.requires_grad = True

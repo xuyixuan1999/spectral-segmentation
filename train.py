@@ -20,13 +20,14 @@ from utils.utils_fit import fit_one_epoch
 
 
 parser = argparse.ArgumentParser()
+parser.add_argument('--anote', type=str, default='', help='note of this training script')
 parser.add_argument('--cuda', action='store_true', default=False, help='Use cuda')
 parser.add_argument('--seed', type=int, default=11, help='random seed')
 parser.add_argument('--distributed', action='store_true', default=False, help='Use distributed training')
 parser.add_argument('--sync_bn', action='store_true', default=False, help='Use sync batch norm')
 parser.add_argument('--fp16', action='store_true', default=False, help='Use fp16 training')
 parser.add_argument('--num_classes', type=int, default=21, help='num classes')
-parser.add_argument('--backbone',choices=['vgg', 'resnet50', 'resnet34', 'resnet18'], default='vgg', help='backbone')
+parser.add_argument('--backbone',choices=['vgg', 'resnet50', 'resnet34', 'resnet18', 'efficientvit'], default='vgg', help='backbone')
 parser.add_argument('--pretrained_model_path', type=str, default=None, help='pretrained model path')
 parser.add_argument('--input_shape', type=int, nargs='+', default=[512, 512], help='Input image shape (width and height)')
 parser.add_argument('--init_epoch', type=int, default=0, help='Init Epoch')
@@ -190,7 +191,7 @@ if __name__ == "__main__":
     #----------------------#
     if local_rank == 0:
         time_str        = datetime.datetime.strftime(datetime.datetime.now(),'%Y_%m_%d_%H_%M_%S')
-        opt.save_dir    = os.path.join(opt.save_dir, "loss_" + str(time_str))
+        opt.save_dir    = os.path.join(opt.save_dir, str(time_str) + "_%s"%opt.anote)
         
         loss_history    = LossHistory(opt.save_dir, model, input_shape=opt.input_shape)
     else:
