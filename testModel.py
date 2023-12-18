@@ -2,35 +2,32 @@ import torch
 
 from nets.twoStream import TwoStreamModel
 from nets.unet import Unet
-from nets.efficientvit import PatchExpanding
+from nets.efficientvit import EfficientHybrid, EfficientViTs_m0
+from nets.ESPFNet import ESPFNet
+from nets.CFT import CFT
+from nets.twoStream import TwoStreamModel
 import numpy as np
-# if __name__ == "__main__":
-#     # rgb = torch.randn(1, 3, 224, 416)
-#     # spec = torch.randn(1, 25, 224, 416)
-    
-#     # # model = TwoStreamModel(num_classes=11, pretrained=False, backbone="resnet18")
+import time
+import tqdm
 
-#     # model.update_backbone('logs/loss_2023_11_12_14_54_52/last_epoch_weights.pth', 
-#     #                       'logs/loss_2023_11_12_15_20_52/last_epoch_weights.pth')
-#     # out = model(spec, rgb)
-#     # print(out.shape)
-    
-spec = torch.randn(1, 3,416,416)
+model_list = [ESPFNet(11, False, 'resnet18'), 
+            #   CFT(11, False, 'resnet18'),
+            #   TwoStreamModel(11, False, 'resnet18'),
+              EfficientHybrid(11, False, 'resnet18', **EfficientViTs_m0)]
 
-model = Unet(num_classes=11, pretrained=False, backbone='resnet18', in_channels=3)
-model_dict      = model.state_dict()
-pretrained_dict = torch.load('logs/loss_2023_11_12_14_54_52_band3_res18/best_epoch_weights.pth', map_location = 'cpu')
-load_key, no_load_key, temp_dict = [], [], {}
-for k, v in pretrained_dict.items():
-    if k in model_dict.keys() and np.shape(model_dict[k]) == np.shape(v):
-        temp_dict[k] = v
-        load_key.append(k)
-    else:
-        no_load_key.append(k)
-model_dict.update(temp_dict)
-model.load_state_dict(model_dict)
+input1 = torch.randn(1, 25, 416, 416).cuda()
+input2 = torch.randn(1, 3, 416, 416).cuda()
 
-output = model(spec)
+throuthout = []
+for model in model_list:
+    model.cuda()
+    model.eval()
+    t0 = time.time()
+    with torch.no_grad():
+        for i in tqdm.tqdm(range(1000)):
+            _ = model(input1, input2)
+        t1 = time.time()
+    throuthout.append(1000/(t1-t0))
 
-print(output.shape)
-    
+for i in range(len(model_list)):
+    print(model_list[i].__class__.__name__, "throuthout: ", throuthout[i])

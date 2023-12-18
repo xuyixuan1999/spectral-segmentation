@@ -13,6 +13,7 @@ from torch.utils.data import DataLoader
 from nets.ESPFNet import ESPFNet
 from nets.CFT import CFT
 from nets.twoStream import TwoStreamModel
+from nets.efficientvit import EfficientHybrid, EfficientViTs_m0, EfficientViTs_m1,EfficientViTs_m2
 from nets.unet_training import get_lr_scheduler, set_optimizer_lr, weights_init
 from utils.callbacks import EvalCallback, LossHistory
 
@@ -50,6 +51,7 @@ parser.add_argument('--eval_flag', type=bool, default=True, help='eval flag')
 parser.add_argument('--eval_period', type=int, default=5, help='eval period')
 parser.add_argument('--dataset_root', type=str, default='VOCdevkit', help='VOCdevkit path')
 parser.add_argument('--gpu_ids', type=str, default='0', help='gpu ids (default: 0)')
+parser.add_argument('--cfg', type=str, default='EfficientViTs_m0', help='cfg of the efficientvit model')
 
 opt = parser.parse_args()
 
@@ -164,9 +166,10 @@ if __name__ == "__main__":
 
     # model = TwoStreamModel(num_classes=opt.num_classes, pretrained=pretrained, backbone=opt.backbone).train()
     # model = ESPFNet(num_classes=opt.num_classes, pretrained=pretrained, backbone=opt.backbone).train()
-    model = CFT(num_classes=opt.num_classes, pretrained=pretrained, backbone=opt.backbone).train()
-    model.update_backbone('logs/loss_2023_11_12_14_54_52_band3_res18/last_epoch_weights.pth', 
-                          'logs/loss_2023_11_12_15_20_52_band25_res18_pretrain/last_epoch_weights.pth')
+    # model = CFT(num_classes=opt.num_classes, pretrained=pretrained, backbone=opt.backbone).train()
+    model = EfficientHybrid(num_classes=opt.num_classes, pretrained=pretrained, backbone=opt.backbone, **eval(opt.cfg)).train()
+    model.update_backbone('logs/2023_11_12_14_54_52_band3_res18/last_epoch_weights.pth', 
+                          'logs/2023_11_12_15_20_52_band25_res18_pretrain/last_epoch_weights.pth')
     if not pretrained:
         weights_init(model)
     if opt.pretrained_model_path != '':
