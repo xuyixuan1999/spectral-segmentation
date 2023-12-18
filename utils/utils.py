@@ -132,14 +132,14 @@ def print_options(opt):
     It will save options into a text file / [checkpoints_dir] / opt.txt
     """
     message = ''
-    message += '-' * 70
+    message += '-' * 90
     message += '\n'
-    message += '|%25s | %40s|\n' % ('keys', 'values')
-    message += '-' * 70
+    message += '|%25s | %60s|\n' % ('keys', 'values')
+    message += '-' * 90
     message += '\n'
     for k, v in sorted(vars(opt).items()):
-        message += '|%25s | %40s|\n' % (str(k), str(v))
-    message += '-' * 70
+        message += '|%25s | %60s|\n' % (str(k), str(v))
+    message += '-' * 90
     print(message)
     # save to the disk
     file_name = os.path.join(opt.save_dir, 'opt.txt')

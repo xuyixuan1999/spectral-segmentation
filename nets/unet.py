@@ -1,9 +1,10 @@
 import torch
 import torch.nn as nn
-
+import sys
+sys.path.append('/root/spectral-segmentation/')
 from nets.resnet import resnet50, resnet34, resnet18
 from nets.vgg import VGG16
-from nets.efficientvit import EfficientViTs, EfficientViTs_m0
+from nets.efficientvit import EfficientViTs, EfficientUp, PatchExpanding, EfficientViTs_m1
 
 
 class unetUp(nn.Module):
@@ -43,37 +44,57 @@ class Unet(nn.Module):
             in_filters = [192, 320, 640, 768]
             self.backbone = 'resnet18'
         elif backbone == 'efficientvit':
-            self.efficientvit = EfficientViTs(in_chans=in_channels, **EfficientViTs_m0)
+            self.efficientvit = EfficientViTs(in_chans=in_channels, **EfficientViTs_m1)
             in_filters = [192, 320, 640, 768]
+            filters = [50,50,100,200,400]
             self.backbone = 'efficientvit'
         else:
             raise ValueError('Unsupported backbone - `{}`, Use vgg, resnet50.'.format(backbone))
         out_filters = [64, 128, 256, 512]
 
         # upsampling
-        # 64,64,512
-        self.up_concat4 = unetUp(in_filters[3], out_filters[3])
-        # 128,128,256
-        self.up_concat3 = unetUp(in_filters[2], out_filters[2])
-        # 256,256,128
-        self.up_concat2 = unetUp(in_filters[1], out_filters[1])
-        # 512,512,64
-        self.up_concat1 = unetUp(in_filters[0], out_filters[0])
+        if self.backbone != 'efficientvit':
+            # 64,64,512
+            self.up_concat4 = unetUp(in_filters[3], out_filters[3])
+            # 128,128,256
+            self.up_concat3 = unetUp(in_filters[2], out_filters[2])
+            # 256,256,128
+            self.up_concat2 = unetUp(in_filters[1], out_filters[1])
+            # 512,512,64
+            self.up_concat1 = unetUp(in_filters[0], out_filters[0])
+        else:
+            # 64,64,512
+            self.up_concat4 = EfficientUp(filters[3], filters[4])
+            # 128,128,256
+            self.up_concat3 = EfficientUp(filters[2], filters[3])
+            # 256,256,128
+            self.up_concat2 = EfficientUp(filters[1], filters[2])
+            # 512,512,64
+            self.up_concat1 = EfficientUp(filters[0], filters[1])
 
-        if "resnet" in self.backbone or 'efficientvit' in self.backbone:
+        if "resnet" in self.backbone:
             self.up_conv = nn.Sequential(
-                nn.UpsamplingBilinear2d(scale_factor = 2), 
+                nn.UpsamplingBilinear2d(scale_factor = 2),
                 nn.Conv2d(out_filters[0], out_filters[0], kernel_size = 3, padding = 1),
                 nn.ReLU(),
                 nn.Conv2d(out_filters[0], out_filters[0], kernel_size = 3, padding = 1),
                 nn.ReLU(),
             )
+        elif "efficientvit" in self.backbone:
+            self.up_conv = nn.Sequential(
+                PatchExpanding(filters[0], filters[0]),
+                nn.Conv2d(filters[0], filters[0], kernel_size = 3, padding = 1),
+                nn.ReLU(),
+                nn.Conv2d(filters[0], filters[0], kernel_size = 3, padding = 1),
+                nn.ReLU(),
+            )
         else:
             self.up_conv = None
-
-        self.final = nn.Conv2d(out_filters[0], num_classes, 1)
-
-        # self.backbone = backbone
+            
+        if self.backbone != 'efficientvit':
+            self.final = nn.Conv2d(out_filters[0], num_classes, 1)
+        else:
+            self.final = nn.Conv2d(filters[0], num_classes, 1)
 
     def forward(self, inputs):
         if self.backbone == "vgg":
@@ -116,3 +137,13 @@ class Unet(nn.Module):
         if 'efficientvit' in self.backbone:
             for param in self.efficientvit.parameters():
                 param.requires_grad = True
+
+if __name__ == "__main__":
+    
+    spec = torch.randn(1, 3, 416, 416)
+    
+    model = Unet(in_channels=3, num_classes=11, backbone='efficientvit')
+    
+    output = Unet(spec)
+
+    print(output.shape)

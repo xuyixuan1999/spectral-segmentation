@@ -15,7 +15,7 @@ from nets.unet_training import get_lr_scheduler, set_optimizer_lr, weights_init
 from utils.callbacks import EvalCallback, LossHistory
 # from utils.dataloader import UnetDataset, unet_dataset_collate
 from utils.dataloader_mat import UnetDatasetMat, image_dataset_collate, UnetDatasetRGB
-from utils.utils import seed_everything, worker_init_fn, print_options
+from utils.utils import seed_everything, worker_init_fn, print_options, Timer
 from utils.utils_fit import fit_one_epoch
 
 
@@ -326,6 +326,7 @@ if __name__ == "__main__":
         else:
             eval_callback   = None
         
+        timer = Timer(opt.init_epoch, opt.unfreeze_epoch)
         #---------------------------------------#
         #   开始模型训练
         #---------------------------------------#
@@ -378,6 +379,9 @@ if __name__ == "__main__":
             fit_one_epoch(opt, model_train, model, loss_history, eval_callback, optimizer, 
                           epoch, epoch_step, epoch_step_val, gen, gen_val, 
                           dice_loss, focal_loss, cls_weights, scaler, local_rank)
+            if local_rank == 0:
+                time_consumed, eta = timer.log()
+                print('==> Time consumed: {:.2f}s, ETA: {}.'.format(time_consumed, datetime.timedelta(seconds=eta)))
 
             if opt.distributed:
                 dist.barrier()

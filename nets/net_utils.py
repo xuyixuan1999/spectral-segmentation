@@ -126,3 +126,33 @@ class CASPP(nn.Module):
         net = self.conv_1x1_output(torch.cat([image_features, atrous_block1, atrous_block6,
                                               atrous_block12, atrous_block18], dim=1))
         return net
+
+class SPP(nn.Module):
+    def __init__(self, c):
+        super(SPP, self).__init__()
+        c_ = int(c/4)
+        self.mean = nn.AdaptiveAvgPool2d((1, 1))  # (1,1)means ouput_dim
+        self.conv = nn.Conv2d(c, c_, 1, 1)
+        self.atrous_block1 = nn.Conv2d(c_, c_, 1, 1)
+
+        self.atrous_block6 = nn.Conv2d(c_, c_, 3, 1, padding=2, dilation=2)
+        self.atrous_block12 = nn.Conv2d(c_, c_, 3, 1, padding=3, dilation=3)
+        self.atrous_block18 = nn.Conv2d(c_, c_, 3, 1, padding=5, dilation=5)
+        self.conv_1x1_output = nn.Conv2d(c_ * 5, c, 1, 1)
+
+    def forward(self, x):
+        size = x.shape[2:]
+
+        image_features = self.mean(x)
+        image_features = self.conv(image_features)
+        image_features = F.interpolate(image_features, size=size, mode='bilinear')
+        x1,x2,x3,x4 = torch.split(x,split_size_or_sections=128,dim=1)
+        atrous_block1 = self.atrous_block1(x1)
+
+        atrous_block6 = self.atrous_block6(x2+atrous_block1)
+        atrous_block12 = self.atrous_block12(x3+atrous_block6)
+        atrous_block18 = self.atrous_block18(x4+atrous_block12)
+
+        net = self.conv_1x1_output(torch.cat([image_features, atrous_block1, atrous_block6,
+                                              atrous_block12, atrous_block18], dim=1))
+        return net

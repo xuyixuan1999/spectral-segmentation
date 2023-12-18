@@ -239,7 +239,7 @@ class EvalCallback():
                 mask = cv2.imread(os.path.join(self.dataset_path, "Train_Mask", image_id + ".png"), 0)
                 mask = np.expand_dims(mask, axis=0)
                 mask = np.broadcast_to(mask, (image.shape[0], mask.shape[1], mask.shape[2]))
-                image = np.where(mask > 0, 0, image)
+                image = np.where(mask > 0, 128/255.0, image)
                 #------------------------------#
                 #   获得预测txt
                 #------------------------------#
