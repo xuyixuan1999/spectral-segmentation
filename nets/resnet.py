@@ -2,7 +2,7 @@ import math
 
 import torch.nn as nn
 import torch.utils.model_zoo as model_zoo
-
+import warnings
 
 def conv3x3(in_planes, out_planes, stride=1, groups=1, dilation=1):
     return nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride,
@@ -162,18 +162,19 @@ class ResNet(nn.Module):
         # x = self.avgpool(x)
         # x = x.view(x.size(0), -1)
         # x = self.fc(x)
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore')  # suppress torch 1.9.0 max_pool2d() warning
+            x       = self.conv1(x)
+            x       = self.bn1(x)
+            feat1   = self.relu(x)
 
-        x       = self.conv1(x)
-        x       = self.bn1(x)
-        feat1   = self.relu(x)
+            x       = self.maxpool(feat1)
+            feat2   = self.layer1(x)
 
-        x       = self.maxpool(feat1)
-        feat2   = self.layer1(x)
-
-        feat3   = self.layer2(feat2)
-        feat4   = self.layer3(feat3)
-        feat5   = self.layer4(feat4)
-        return [feat1, feat2, feat3, feat4, feat5]
+            feat3   = self.layer2(feat2)
+            feat4   = self.layer3(feat3)
+            feat5   = self.layer4(feat4)
+            return [feat1, feat2, feat3, feat4, feat5]
 
 def resnet50(pretrained=False, in_channels=3, **kwargs):
     model = ResNet(Bottleneck, [3, 4, 6, 3], in_channels, **kwargs)
