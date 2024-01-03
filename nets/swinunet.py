@@ -5,6 +5,18 @@ import torch.utils.checkpoint as checkpoint
 from einops import rearrange
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
 
+SwinUnet_m0 = {
+    "embed_dim":96,
+    "depths":[2, 4, 6, 2],
+    "num_heads":[3, 6, 12, 24],
+}
+
+SwinUnet_m1 = {
+    "embed_dim":128,
+    "depths":[2, 2, 6, 2],
+    "num_heads":[3, 6, 12, 24],
+}
+
 
 class Mlp(nn.Module):
     def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, drop=0.):
@@ -753,12 +765,10 @@ class SwinTransformerSys(nn.Module):
     
     
 class SwinUnet(nn.Module):
-    def __init__(self, num_classes=21843, img_size=416, zero_head=False, vis=False, in_channels=3):
+    def __init__(self, num_classes=21843, img_size=416, zero_head=False, in_channels=3, **kwargs):
         super(SwinUnet, self).__init__()
         self.num_classes = num_classes
         self.zero_head = zero_head
-        
-
 
         self.swin_unet = SwinTransformerSys(img_size=img_size,
                                 patch_size=4,
@@ -777,9 +787,10 @@ class SwinUnet(nn.Module):
         return logits
     
 if __name__ == "__main__":
-    model = SwinUnet(num_classes=14, img_size=416, zero_head=False, vis=False, in_channels=3)
+    model = SwinUnet(num_classes=14, img_size=416, zero_head=False, vis=False, in_channels=25)
     model.eval()
-    dummy_input = torch.randn(1, 3, 416, 416)
-    output = model(dummy_input)
-    print(output.shape)
+    dummy_input = torch.randn(1, 25, 416, 416)
+    with torch.no_grad():
+        output = model(dummy_input)
+        print(output.shape)
  

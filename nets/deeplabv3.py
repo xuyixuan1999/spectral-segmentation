@@ -81,7 +81,7 @@ class Xception(nn.Module):
     Xception optimized for the ImageNet dataset, as specified in
     https://arxiv.org/pdf/1610.02357.pdf
     """
-    def __init__(self, downsample_factor):
+    def __init__(self, downsample_factor, in_channels=3):
         """ Constructor
         Args:
             num_classes: number of classes
@@ -95,7 +95,7 @@ class Xception(nn.Module):
             stride_list = [2,2,1]
         else:
             raise ValueError('xception.py: output stride=%d is not supported.'%os) 
-        self.conv1 = nn.Conv2d(3, 32, 3, 2, 1, bias=False)
+        self.conv1 = nn.Conv2d(in_channels, 32, 3, 2, 1, bias=False)
         self.bn1 = nn.BatchNorm2d(32, momentum=bn_mom)
         self.relu = nn.ReLU(inplace=True)
         
@@ -194,8 +194,8 @@ def load_url(url, model_dir='./model_data', map_location=None):
     else:
         return model_zoo.load_url(url,model_dir=model_dir)
 
-def xception(pretrained=True, downsample_factor=16):
-    model = Xception(downsample_factor=downsample_factor)
+def xception(pretrained=True, downsample_factor=16, in_channels=3):
+    model = Xception(downsample_factor=downsample_factor, in_channels=in_channels)
     if pretrained:
         # model.load_state_dict(load_url('https://github.com/bubbliiiing/deeplabv3-plus-pytorch/releases/download/v1.0/xception_pytorch_imagenet.pth'), strict=False)
         state_dict = load_url('https://github.com/bubbliiiing/deeplabv3-plus-pytorch/releases/download/v1.0/xception_pytorch_imagenet.pth')
@@ -203,6 +203,7 @@ def xception(pretrained=True, downsample_factor=16):
         model_dict = model.state_dict()
         model_dict.update(state_dict)
         model.load_state_dict(model_dict)
+        print("xception loaded")
     return model
 
 def conv_bn(inp, oup, stride):
@@ -270,7 +271,7 @@ class InvertedResidual(nn.Module):
             return self.conv(x)
 
 class MobileNetV2(nn.Module):
-    def __init__(self, n_class=1000, input_size=224, width_mult=1.):
+    def __init__(self, n_class=1000, input_size=224, width_mult=1., in_channels=3):
         super(MobileNetV2, self).__init__()
         block = InvertedResidual
         input_channel = 32
@@ -290,7 +291,7 @@ class MobileNetV2(nn.Module):
         input_channel = int(input_channel * width_mult)
         self.last_channel = int(last_channel * width_mult) if width_mult > 1.0 else last_channel
         # 512, 512, 3 -> 256, 256, 32
-        self.features = [conv_bn(3, input_channel, 2)]
+        self.features = [conv_bn(in_channels, input_channel, 2)]
 
         for t, c, n, s in interverted_residual_setting:
             output_channel = int(c * width_mult)
@@ -343,22 +344,23 @@ def load_url(url, model_dir='./model_data', map_location=None):
     else:
         return model_zoo.load_url(url,model_dir=model_dir)
 
-def mobilenetv2(pretrained=False, **kwargs):
-    model = MobileNetV2(n_class=1000, **kwargs)
+def mobilenetv2(pretrained=False, in_channels=3, **kwargs):
+    model = MobileNetV2(n_class=1000, in_channels=in_channels, **kwargs)
     if pretrained:
         state_dict = load_url('https://github.com/bubbliiiing/deeplabv3-plus-pytorch/releases/download/v1.0/mobilenet_v2.pth.tar')  
         state_dict = {k: v for k, v in state_dict.items() if (k in model.state_dict()) and (v.size() == model.state_dict()[k].size())}
         model_dict = model.state_dict()
         model_dict.update(state_dict)
         model.load_state_dict(model_dict)
+        print("mobilenetv2 loaded")
     return model
 
 class MobileNetV2_(nn.Module):
-    def __init__(self, downsample_factor=8, pretrained=True):
+    def __init__(self, downsample_factor=8, pretrained=True, in_channels=3):
         super(MobileNetV2_, self).__init__()
         from functools import partial
         
-        model           = mobilenetv2(pretrained)
+        model           = mobilenetv2(pretrained, in_channels=in_channels)
         self.features   = model.features[:-1]
 
         self.total_idx  = len(self.features)
@@ -463,7 +465,7 @@ class ASPP(nn.Module):
 		return result
 
 class DeepLab(nn.Module):
-    def __init__(self, num_classes, backbone="mobilenet", pretrained=True, downsample_factor=16):
+    def __init__(self, num_classes, backbone="mobilenet", pretrained=True, downsample_factor=16, in_channels=3):
         super(DeepLab, self).__init__()
         if backbone=="xception":
             #----------------------------------#
@@ -471,8 +473,8 @@ class DeepLab(nn.Module):
             #   浅层特征    [128,128,256]
             #   主干部分    [30,30,2048]
             #----------------------------------#
-            self.backbone = xception(downsample_factor=downsample_factor, pretrained=pretrained)
-            in_channels = 2048
+            self.backbone = xception(downsample_factor=downsample_factor, pretrained=pretrained, in_channels=in_channels)
+            in_channels_ = 2048
             low_level_channels = 256
         elif backbone=="mobilenet":
             #----------------------------------#
@@ -480,8 +482,8 @@ class DeepLab(nn.Module):
             #   浅层特征    [128,128,24]
             #   主干部分    [30,30,320]
             #----------------------------------#
-            self.backbone = MobileNetV2_(downsample_factor=downsample_factor, pretrained=pretrained)
-            in_channels = 320
+            self.backbone = MobileNetV2_(downsample_factor=downsample_factor, pretrained=pretrained, in_channels=in_channels)
+            in_channels_ = 320
             low_level_channels = 24
         else:
             raise ValueError('Unsupported backbone - `{}`, Use mobilenet, xception.'.format(backbone))
@@ -490,7 +492,7 @@ class DeepLab(nn.Module):
         #   ASPP特征提取模块
         #   利用不同膨胀率的膨胀卷积进行特征提取
         #-----------------------------------------#
-        self.aspp = ASPP(dim_in=in_channels, dim_out=256, rate=16//downsample_factor)
+        self.aspp = ASPP(dim_in=in_channels_, dim_out=256, rate=16//downsample_factor)
         
         #----------------------------------#
         #   浅层特征边
@@ -537,8 +539,8 @@ class DeepLab(nn.Module):
         return x
 
 if __name__ == "__main__":
-    model = DeepLab(num_classes=21, backbone="mobilenet", pretrained=True, downsample_factor=16)
+    model = DeepLab(num_classes=21, backbone="xception", pretrained=True, downsample_factor=16, in_channels=25)
     model.eval()
-    inputs = torch.randn(1,3,416,416)
+    inputs = torch.randn(1,25,416,416)
     outputs = model(inputs)
     print(outputs.size())

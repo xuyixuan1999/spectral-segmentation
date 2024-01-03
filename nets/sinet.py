@@ -87,12 +87,12 @@ class Bottleneck(nn.Module):
 
 class ResNet_2Branch(nn.Module):
     # ResNet50 with two branches (modified from torchvision.models.resnet (pytorch==0.4.1))
-    def __init__(self):
+    def __init__(self, in_channels=3):
         # self.inplanes = 128
         self.inplanes = 64
         super(ResNet_2Branch, self).__init__()
 
-        self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3,
+        self.conv1 = nn.Conv2d(in_channels, 64, kernel_size=7, stride=2, padding=3,
                                bias=False)
         self.bn1 = nn.BatchNorm2d(64)
         self.relu = nn.ReLU(inplace=True)
@@ -316,10 +316,10 @@ class PDC_IM(nn.Module):
 
 class SINet(nn.Module):
     # resnet based encoder decoder
-    def __init__(self, num_classes, channel=32, opt=None):
+    def __init__(self, num_classes, channel=32, opt=None, in_channels=3):
         super(SINet, self).__init__()
 
-        self.resnet = ResNet_2Branch()
+        self.resnet = ResNet_2Branch(in_channels=in_channels)
         self.downSample = nn.MaxPool2d(2, stride=2)
 
         self.rf_low_sm = RF(320, channel)
@@ -410,14 +410,17 @@ class SINet(nn.Module):
                 v = pretrained_dict[name]
                 all_params[k] = v
         assert len(all_params.keys()) == len(self.resnet.state_dict().keys())
+        state_dict = {k: v for k, v in all_params.items() if (k in self.resnet.state_dict()) and (v.size() == self.resnet.state_dict()[k].size())}
+        model_dict = self.resnet.state_dict()
+        model_dict.update(state_dict)
 
-        self.resnet.load_state_dict(all_params)
+        self.resnet.load_state_dict(model_dict)
         print('[INFO] initialize weights from resnet50')
 
 
 if __name__ == '__main__':
-    model = SINet(14)
-    dummy_input = torch.randn(1, 3, 416, 416)
+    model = SINet(14, in_channels=25)
+    dummy_input = torch.randn(1, 25, 416, 416)
     model.eval()
     outputs = model(dummy_input)
     print(outputs.shape)
