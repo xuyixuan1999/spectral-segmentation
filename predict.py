@@ -7,10 +7,49 @@ import time
 import cv2
 import numpy as np
 from PIL import Image
+import h5py
 
-from unet import Unet_ONNX, Unet
+from unet import Unet_ONNX, Unet, Fusion
 
 if __name__ == "__main__":
+    config = {
+        "model_name"         : 'unet',
+        #-------------------------------------------------------------------#
+        #   model_path指向logs文件夹下的权值文件
+        #   训练好后logs文件夹下存在多个权值文件，选择验证集损失较低的即可。
+        #   验证集损失较低不代表miou较高，仅代表该权值在验证集上泛化性能较好。
+        #-------------------------------------------------------------------#
+        "model_path"    : 'logs/unet/2023_12_21_12_26_57_rec_25band_multi_pre/best_epoch_weights.pth',
+        #--------------------------------#
+        #   所需要区分的类的个数+1
+        #--------------------------------#
+        "num_classes"   : 14,
+        #-------------------------------#
+        #   channels of input image
+        #-------------------------------#
+        "in_channels"   : 25,
+        #--------------------------------#
+        #   所使用的的主干网络：vgg、resnet50   
+        #--------------------------------#
+        "backbone"      : "resnet18",
+        #--------------------------------#
+        #   输入图片的大小
+        #--------------------------------#
+        "input_shape"   : [416, 416],
+        #-------------------------------------------------#
+        #   mix_type参数用于控制检测结果的可视化方式
+        #
+        #   mix_type = 0的时候代表原图与生成的图进行混合
+        #   mix_type = 1的时候代表仅保留生成的图
+        #   mix_type = 2的时候代表仅扣去背景，仅保留原图中的目标
+        #-------------------------------------------------#
+        "mix_type"      : 0,
+        #--------------------------------#
+        #   是否使用Cuda
+        #   没有GPU可以设置成False
+        #--------------------------------#
+        "cuda"          : True,
+    }
     #-------------------------------------------------------------------------#
     #   如果想要修改对应种类的颜色，到__init__函数里修改self.colors即可
     #-------------------------------------------------------------------------#
@@ -24,6 +63,8 @@ if __name__ == "__main__":
     #   'predict_onnx'      表示利用导出的onnx模型进行预测，相关参数的修改在unet.py_346行左右处的Unet_ONNX
     #----------------------------------------------------------------------------------------------------------#
     mode = "predict"
+    
+    model_type = 'spec'
     #-------------------------------------------------------------------------#
     #   count               指定了是否进行目标的像素点计数（即面积）与比例计算
     #   name_classes        区分的种类，和json_to_dataset里面的一样，用于打印种类和数量
@@ -31,11 +72,13 @@ if __name__ == "__main__":
     #   count、name_classes仅在mode='predict'时有效
     #-------------------------------------------------------------------------#
     count           = False
-    # name_classes    = ["background","aeroplane", "bicycle", "bird", "boat", "bottle", "bus", "car", "cat", "chair", "cow", "diningtable", "dog", "horse", "motorbike", "person", "pottedplant", "sheep", "sofa", "train", "tvmonitor"]
-    name_classes    = ["_background_", "desert camouflage net", "desert two-color camouflage net", 
-"desert three-color camouflage net", "desert grass camouflage net", "anti-infrared camouflage net", 
-"forest three-color grass camouflage net", "forest two-color glass camouflage net",
-"forest two-color optical camouflage net", "forest three-color optical camouflage net", "forest digital camouflage net"]
+    
+    name_classes    = ["_background", "desert camouflage net", "desert two-color camouflage net", 
+                       "desert three-color camouflage net", "desert grass camouflage net", 
+                       "anti-infrared camouflage net", "forest three-color grass camouflage net", 
+                       "forest two-color glass camouflage net", "forest two-color optical camouflage net", 
+                       "forest three-color optical camouflage net", "forest digital camouflage net", 
+                       "desert camouflage people", "forest camouflage people", "camouflage plate"]
     #----------------------------------------------------------------------------------------------------------#
     #   video_path          用于指定视频的路径，当video_path=0时表示检测摄像头
     #                       想要检测视频，则设置如video_path = "xxx.mp4"即可，代表读取出根目录下的xxx.mp4文件。
@@ -73,7 +116,7 @@ if __name__ == "__main__":
     onnx_save_path  = "model_data/models.onnx"
 
     if mode != "predict_onnx":
-        unet = Unet()
+        unet = Fusion(**config)
     else:
         yolo = Unet_ONNX()
 
@@ -91,17 +134,35 @@ if __name__ == "__main__":
             seg_img[:, :, 1] += ((pr == c)*( self.colors[c][1] )).astype('uint8')
             seg_img[:, :, 2] += ((pr == c)*( self.colors[c][2] )).astype('uint8')
         '''
-        while True:
-            img = input('Input image filename:')
-            try:
-                image = Image.open(img)
-            except:
-                print('Open Error! Try again!')
-                continue
-            else:
-                r_image = unet.detect_image(image, count=count, name_classes=name_classes)
+        img = '/root/spectral-segmentation/datasets/spectral-dataset-multi/JPEGImages/2021-4-6_8m_45_1_006.jpg'
+        mask_path = img.replace('JPEGImages', 'Train_Mask').replace('jpg', 'png')
+        spec_path = img.replace('JPEGImages', 'Train_Spec').replace('jpg', 'mat')
+        try:
+            image = Image.open(img)
+            mask = Image.open(mask_path)
+            with h5py.File(spec_path, 'r') as mat:
+                spec = np.float32(np.array(mat['cube']))
+            spec = np.transpose(spec, (2, 1, 0))
+        except:
+            print('Open Error! Try again!')
+        else:
+            if model_type == 'rgb':
+                r_image = unet.detect_image_rgb(image, mask, count=count, name_classes=name_classes)
                 # r_image.show()
                 r_image.save("img_out.jpg")
+                print('===>Detecting rgb image successfully!')
+            elif model_type == 'fusion':
+                r_image = unet.detect_image_fusion(spec, image, mask, count=count, name_classes=name_classes)
+                # r_image.show()
+                r_image.save("img_out.jpg")
+                print('===>Detecting fusion successfully!')
+            elif model_type == 'spec':
+                r_image = unet.detect_image_spec(spec, image, mask, count=count, name_classes=name_classes)
+                # r_image.show()
+                r_image.save("img_out.jpg")
+                print('===>Detecting spectral image successfully!')
+            else:
+                raise AssertionError("Please specify the correct model_type: 'rgb', 'spec' or 'fusion'.")
 
     elif mode == "video":
         capture=cv2.VideoCapture(video_path)

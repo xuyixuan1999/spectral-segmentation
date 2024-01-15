@@ -140,7 +140,7 @@ if __name__ == "__main__":
     cls_weights     = np.ones([opt.num_classes], np.float32)
     
     sync_bn         = False
-    pretrained  = True
+    pretrained  = False
     
 
     seed_everything(opt.seed)

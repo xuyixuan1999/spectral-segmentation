@@ -575,7 +575,7 @@ class Fusion(object):
         #--------------------------------#
         #   输入图片的大小
         #--------------------------------#
-        "input_shape"   : [224, 416],
+        "input_shape"   : [416, 416],
         #-------------------------------------------------#
         #   mix_type参数用于控制检测结果的可视化方式
         #
@@ -622,10 +622,13 @@ class Fusion(object):
     #---------------------------------------------------#
     def generate(self, onnx=False):
         # self.net = unet(num_classes = self.num_classes, backbone=self.backbone)
-        self.net = generate_model(model_name=self.model_name, num_classes=self.num_classes, backbone=self.backbone, pretrained=False)
+        self.net = generate_model(model_name=self.model_name, num_classes=self.num_classes, backbone=self.backbone, in_channels=self.in_channels, pretrained=False)
 
         device      = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.net.load_state_dict(torch.load(self.model_path, map_location=device))
+        if self.is_pruned:
+            self.net = torch.load(self.model_path, map_location=device)
+        else:
+            self.net.load_state_dict(torch.load(self.model_path, map_location=device))
         self.net    = self.net.eval()
         print('{} model, and classes loaded.'.format(self.model_path))
         if not onnx:
@@ -636,27 +639,37 @@ class Fusion(object):
     #---------------------------------------------------#
     #   检测图片
     #---------------------------------------------------#
-    def detect_image(self, image, count=False, name_classes=None):
+    def detect_image_rgb(self, image, mask=None, count=False, name_classes=None):
+        '''
+        image, mask is PIL Image
+        '''
         #---------------------------------------------------------#
-        #   在这里将图像转换成RGB图像，防止灰度图在预测时报错。
-        #   代码仅仅支持RGB图像的预测，所有其它类型的图像都会转化成RGB
-        #---------------------------------------------------------#
-        image       = cvtColor(image)
+        # image       = cvtColor(image)
         #---------------------------------------------------#
         #   对输入图像进行一个备份，后面用于绘图
         #---------------------------------------------------#
         old_img     = copy.deepcopy(image)
-        orininal_h  = np.array(image).shape[0]
-        orininal_w  = np.array(image).shape[1]
+        image = np.array(image, dtype=np.uint8)
+        orininal_h  = image.shape[0]
+        orininal_w  = image.shape[1]
+        
+        if mask is not None:
+            mask = np.array(mask, dtype=np.uint8)
+            mask_rgb = np.expand_dims(mask, axis=2)
+            mask_rgb = np.broadcast_to(mask_rgb, (image.shape[0], image.shape[1], image.shape[2]))
+            image  = np.where(mask_rgb > 0, 128, image)
+            
         #---------------------------------------------------------#
         #   给图像增加灰条，实现不失真的resize
         #   也可以直接resize进行识别
         #---------------------------------------------------------#
-        image_data, nw, nh  = resize_image(image, (self.input_shape[1],self.input_shape[0]))
+        image_data, nw, nh  = resize_mat(image, (self.input_shape[1],self.input_shape[0]))
+        
         #---------------------------------------------------------#
         #   添加上batch_size维度
         #---------------------------------------------------------#
-        image_data  = np.expand_dims(np.transpose(preprocess_input(np.array(image_data, np.float32)), (2, 0, 1)), 0)
+        image_data  = np.expand_dims(np.transpose(np.array(image_data, np.float32) / 255.0, (2, 0, 1)), 0)
+
 
         with torch.no_grad():
             images = torch.from_numpy(image_data)
@@ -740,98 +753,244 @@ class Fusion(object):
         
         return image
 
-    def get_FPS(self, image, test_interval):
-        #---------------------------------------------------------#
-        #   在这里将图像转换成RGB图像，防止灰度图在预测时报错。
-        #   代码仅仅支持RGB图像的预测，所有其它类型的图像都会转化成RGB
-        #---------------------------------------------------------#
-        image       = cvtColor(image)
+    def detect_image_fusion(self, spec, rgb, mask=None, count=False, name_classes=None):
+        '''
+        spec: numpy array shape is [c, h, w] and [0, 1]
+        rgb, mask is PIL Image
+        '''
+        #   对输入图像进行一个备份，后面用于绘图
+        #---------------------------------------------------#
+        old_spec = copy.deepcopy(spec)
+        old_rgb     = copy.deepcopy(rgb)
+        
+        rgb = np.array(rgb, dtype=np.uint8)
+        orininal_h  = rgb.shape[0]
+        orininal_w  = rgb.shape[1]
+        
+        if mask is not None:
+            mask = np.array(mask, dtype=np.uint8)
+            mask_rgb = np.expand_dims(mask, axis=2)
+            mask_rgb = np.broadcast_to(mask_rgb, (rgb.shape[0], rgb.shape[1], rgb.shape[2]))
+            rgb  = np.where(mask_rgb > 0, 128, rgb)
+            
+            mask_spec = np.expand_dims(mask, axis=0)
+            mask_spec = np.broadcast_to(mask_spec, (spec.shape[0], spec.shape[1], spec.shape[2]))
+            spec = np.where(mask_spec > 0, 128 / 255.0, spec)
+        
+        spec = np.transpose(spec, [1, 2, 0]) # [h, w, c]
+        spec = (spec - np.min(spec)) / (np.max(spec) - np.min(spec))
+        spec = (spec * 255).astype(np.uint8)
+            
         #---------------------------------------------------------#
         #   给图像增加灰条，实现不失真的resize
         #   也可以直接resize进行识别
         #---------------------------------------------------------#
-        image_data, nw, nh  = resize_image(image, (self.input_shape[1],self.input_shape[0]))
+        spec_data, nw, nh  = resize_mat(spec, (self.input_shape[1], self.input_shape[0]))
+        rgb_data, _, _  = resize_mat(rgb, (self.input_shape[1],self.input_shape[0]))
+        
         #---------------------------------------------------------#
         #   添加上batch_size维度
         #---------------------------------------------------------#
-        image_data  = np.expand_dims(np.transpose(preprocess_input(np.array(image_data, np.float32)), (2, 0, 1)), 0)
+        rgb_data  = np.expand_dims(np.transpose(np.array(rgb_data, np.float32) / 255.0, (2, 0, 1)), 0)
+        spec_data  = np.expand_dims(np.transpose(np.array(spec_data, np.float32) / 255.0, (2, 0, 1)), 0)
 
         with torch.no_grad():
-            images = torch.from_numpy(image_data)
+            rgbs = torch.from_numpy(rgb_data)
+            specs = torch.from_numpy(spec_data)
             if self.cuda:
-                images = images.cuda()
-                
+                rgbs = rgbs.cuda()
+                specs = specs.cuda()
             #---------------------------------------------------#
             #   图片传入网络进行预测
             #---------------------------------------------------#
-            pr = self.net(images)[0]
+            pr = self.net(specs, rgbs)[0]
             #---------------------------------------------------#
             #   取出每一个像素点的种类
             #---------------------------------------------------#
-            pr = F.softmax(pr.permute(1,2,0),dim = -1).cpu().numpy().argmax(axis=-1)
+            pr = F.softmax(pr.permute(1,2,0),dim = -1).cpu().numpy()
             #--------------------------------------#
             #   将灰条部分截取掉
             #--------------------------------------#
             pr = pr[int((self.input_shape[0] - nh) // 2) : int((self.input_shape[0] - nh) // 2 + nh), \
                     int((self.input_shape[1] - nw) // 2) : int((self.input_shape[1] - nw) // 2 + nw)]
-
-        t1 = time.time()
-        for _ in range(test_interval):
-            with torch.no_grad():
-                #---------------------------------------------------#
-                #   图片传入网络进行预测
-                #---------------------------------------------------#
-                pr = self.net(images)[0]
-                #---------------------------------------------------#
-                #   取出每一个像素点的种类
-                #---------------------------------------------------#
-                pr = F.softmax(pr.permute(1,2,0),dim = -1).cpu().numpy().argmax(axis=-1)
-                #--------------------------------------#
-                #   将灰条部分截取掉
-                #--------------------------------------#
-                pr = pr[int((self.input_shape[0] - nh) // 2) : int((self.input_shape[0] - nh) // 2 + nh), \
-                        int((self.input_shape[1] - nw) // 2) : int((self.input_shape[1] - nw) // 2 + nw)]
-        t2 = time.time()
-        tact_time = (t2 - t1) / test_interval
-        return tact_time
-
-    def convert_to_onnx(self, simplify, model_path):
-        import onnx
-        self.generate(onnx=True)
-
-        im                  = torch.zeros(1, 3, *self.input_shape).to('cpu')  # image size(1, 3, 512, 512) BCHW
-        input_layer_names   = ["images"]
-        output_layer_names  = ["output"]
+            #---------------------------------------------------#
+            #   进行图片的resize
+            #---------------------------------------------------#
+            pr = cv2.resize(pr, (orininal_w, orininal_h), interpolation = cv2.INTER_LINEAR)
+            #---------------------------------------------------#
+            #   取出每一个像素点的种类
+            #---------------------------------------------------#
+            pr = pr.argmax(axis=-1)
         
-        # Export the model
-        print(f'Starting export with onnx {onnx.__version__}.')
-        torch.onnx.export(self.net,
-                        im,
-                        f               = model_path,
-                        verbose         = False,
-                        opset_version   = 12,
-                        training        = torch.onnx.TrainingMode.EVAL,
-                        do_constant_folding = True,
-                        input_names     = input_layer_names,
-                        output_names    = output_layer_names,
-                        dynamic_axes    = None)
+        #---------------------------------------------------------#
+        #   计数
+        #---------------------------------------------------------#
+        if count:
+            classes_nums        = np.zeros([self.num_classes])
+            total_points_num    = orininal_h * orininal_w
+            print('-' * 63)
+            print("|%25s | %15s | %15s|"%("Key", "Value", "Ratio"))
+            print('-' * 63)
+            for i in range(self.num_classes):
+                num     = np.sum(pr == i)
+                ratio   = num / total_points_num * 100
+                if num > 0:
+                    print("|%25s | %15s | %14.2f%%|"%(str(name_classes[i]), str(num), ratio))
+                    print('-' * 63)
+                classes_nums[i] = num
+            print("classes_nums:", classes_nums)
 
-        # Checks
-        model_onnx = onnx.load(model_path)  # load onnx model
-        onnx.checker.check_model(model_onnx)  # check onnx model
+        if self.mix_type == 0:
+            # seg_img = np.zeros((np.shape(pr)[0], np.shape(pr)[1], 3))
+            # for c in range(self.num_classes):
+            #     seg_img[:, :, 0] += ((pr[:, :] == c ) * self.colors[c][0]).astype('uint8')
+            #     seg_img[:, :, 1] += ((pr[:, :] == c ) * self.colors[c][1]).astype('uint8')
+            #     seg_img[:, :, 2] += ((pr[:, :] == c ) * self.colors[c][2]).astype('uint8')
+            seg_img = np.reshape(np.array(self.colors, np.uint8)[np.reshape(pr, [-1])], [orininal_h, orininal_w, -1])
+            #------------------------------------------------#
+            #   将新图片转换成Image的形式
+            #------------------------------------------------#
+            image   = Image.fromarray(np.uint8(seg_img))
+            #------------------------------------------------#
+            #   将新图与原图及进行混合
+            #------------------------------------------------#
+            image   = Image.blend(old_rgb, image, 0.7)
 
-        # Simplify onnx
-        if simplify:
-            import onnxsim
-            print(f'Simplifying with onnx-simplifier {onnxsim.__version__}.')
-            model_onnx, check = onnxsim.simplify(
-                model_onnx,
-                dynamic_input_shape=False,
-                input_shapes=None)
-            assert check, 'assert check failed'
-            onnx.save(model_onnx, model_path)
+        elif self.mix_type == 1:
+            # seg_img = np.zeros((np.shape(pr)[0], np.shape(pr)[1], 3))
+            # for c in range(self.num_classes):
+            #     seg_img[:, :, 0] += ((pr[:, :] == c ) * self.colors[c][0]).astype('uint8')
+            #     seg_img[:, :, 1] += ((pr[:, :] == c ) * self.colors[c][1]).astype('uint8')
+            #     seg_img[:, :, 2] += ((pr[:, :] == c ) * self.colors[c][2]).astype('uint8')
+            seg_img = np.reshape(np.array(self.colors, np.uint8)[np.reshape(pr, [-1])], [orininal_h, orininal_w, -1])
+            #------------------------------------------------#
+            #   将新图片转换成Image的形式
+            #------------------------------------------------#
+            image   = Image.fromarray(np.uint8(seg_img))
 
-        print('Onnx model save as {}'.format(model_path))
+        elif self.mix_type == 2:
+            seg_img = (np.expand_dims(pr != 0, -1) * np.array(old_rgb, np.float32)).astype('uint8')
+            #------------------------------------------------#
+            #   将新图片转换成Image的形式
+            #------------------------------------------------#
+            image = Image.fromarray(np.uint8(seg_img))
+        
+        return image
+
+    def detect_image_spec(self, spec, rgb, mask=None, count=False, name_classes=None):
+        '''
+        spec: numpy array shape is [c, h, w] and [0, 1]
+        mask is PIL Image
+        '''
+        #   对输入图像进行一个备份，后面用于绘图
+        #---------------------------------------------------#
+        old_spec = copy.deepcopy(spec)
+        # old_rgb     = copy.deepcopy(rgb)
+        
+        
+        if mask is not None:
+            mask = np.array(mask, dtype=np.uint8)            
+            mask_spec = np.expand_dims(mask, axis=0)
+            mask_spec = np.broadcast_to(mask_spec, (spec.shape[0], spec.shape[1], spec.shape[2]))
+            spec = np.where(mask_spec > 0, 128 / 255.0, spec)
+        
+        spec = np.transpose(spec, [1, 2, 0]) # [h, w, c]
+        spec = (spec - np.min(spec)) / (np.max(spec) - np.min(spec))
+        spec = (spec * 255).astype(np.uint8)
+        
+        orininal_h  = np.array(rgb).shape[0]
+        orininal_w  = np.array(rgb).shape[1]
+        #---------------------------------------------------------#
+        #   给图像增加灰条，实现不失真的resize
+        #   也可以直接resize进行识别
+        #---------------------------------------------------------#
+        spec_data, nw, nh  = resize_mat(spec, (self.input_shape[1], self.input_shape[0]))
+        
+        #---------------------------------------------------------#
+        #   添加上batch_size维度
+        #---------------------------------------------------------#
+        spec_data  = np.expand_dims(np.transpose(np.array(spec_data, np.float32) / 255.0, (2, 0, 1)), 0)
+
+        with torch.no_grad():
+            specs = torch.from_numpy(spec_data)
+            if self.cuda:
+                specs = specs.cuda()
+            #---------------------------------------------------#
+            #   图片传入网络进行预测
+            #---------------------------------------------------#
+            pr = self.net(specs)[0]
+            #---------------------------------------------------#
+            #   取出每一个像素点的种类
+            #---------------------------------------------------#
+            pr = F.softmax(pr.permute(1,2,0),dim = -1).cpu().numpy()
+            #--------------------------------------#
+            #   将灰条部分截取掉
+            #--------------------------------------#
+            pr = pr[int((self.input_shape[0] - nh) // 2) : int((self.input_shape[0] - nh) // 2 + nh), \
+                    int((self.input_shape[1] - nw) // 2) : int((self.input_shape[1] - nw) // 2 + nw)]
+            #---------------------------------------------------#
+            #   进行图片的resize
+            #---------------------------------------------------#
+            pr = cv2.resize(pr, (orininal_w, orininal_h), interpolation = cv2.INTER_LINEAR)
+            #---------------------------------------------------#
+            #   取出每一个像素点的种类
+            #---------------------------------------------------#
+            pr = pr.argmax(axis=-1)
+        
+        #---------------------------------------------------------#
+        #   计数
+        #---------------------------------------------------------#
+        if count:
+            classes_nums        = np.zeros([self.num_classes])
+            total_points_num    = orininal_h * orininal_w
+            print('-' * 63)
+            print("|%25s | %15s | %15s|"%("Key", "Value", "Ratio"))
+            print('-' * 63)
+            for i in range(self.num_classes):
+                num     = np.sum(pr == i)
+                ratio   = num / total_points_num * 100
+                if num > 0:
+                    print("|%25s | %15s | %14.2f%%|"%(str(name_classes[i]), str(num), ratio))
+                    print('-' * 63)
+                classes_nums[i] = num
+            print("classes_nums:", classes_nums)
+
+        if self.mix_type == 0:
+            # seg_img = np.zeros((np.shape(pr)[0], np.shape(pr)[1], 3))
+            # for c in range(self.num_classes):
+            #     seg_img[:, :, 0] += ((pr[:, :] == c ) * self.colors[c][0]).astype('uint8')
+            #     seg_img[:, :, 1] += ((pr[:, :] == c ) * self.colors[c][1]).astype('uint8')
+            #     seg_img[:, :, 2] += ((pr[:, :] == c ) * self.colors[c][2]).astype('uint8')
+            seg_img = np.reshape(np.array(self.colors, np.uint8)[np.reshape(pr, [-1])], [orininal_h, orininal_w, -1])
+            #------------------------------------------------#
+            #   将新图片转换成Image的形式
+            #------------------------------------------------#
+            image   = Image.fromarray(np.uint8(seg_img))
+            #------------------------------------------------#
+            #   将新图与原图及进行混合
+            #------------------------------------------------#
+            image   = Image.blend(rgb, image, 0.7)
+
+        elif self.mix_type == 1:
+            # seg_img = np.zeros((np.shape(pr)[0], np.shape(pr)[1], 3))
+            # for c in range(self.num_classes):
+            #     seg_img[:, :, 0] += ((pr[:, :] == c ) * self.colors[c][0]).astype('uint8')
+            #     seg_img[:, :, 1] += ((pr[:, :] == c ) * self.colors[c][1]).astype('uint8')
+            #     seg_img[:, :, 2] += ((pr[:, :] == c ) * self.colors[c][2]).astype('uint8')
+            seg_img = np.reshape(np.array(self.colors, np.uint8)[np.reshape(pr, [-1])], [orininal_h, orininal_w, -1])
+            #------------------------------------------------#
+            #   将新图片转换成Image的形式
+            #------------------------------------------------#
+            image   = Image.fromarray(np.uint8(seg_img))
+
+        elif self.mix_type == 2:
+            seg_img = (np.expand_dims(pr != 0, -1) * np.array(rgb, np.float32)).astype('uint8')
+            #------------------------------------------------#
+            #   将新图片转换成Image的形式
+            #------------------------------------------------#
+            image = Image.fromarray(np.uint8(seg_img))
+        
+        return image
 
     def get_detection_fusion(self, data_path, image_id):
         # gt_dir = os.path.join(data_path, "SegmentationClass")
@@ -942,6 +1101,80 @@ class Fusion(object):
                 images = images.cuda()
 
             pr = self.net(images)[0]
+            #---------------------------------------------------#
+            #   取出每一个像素点的种类
+            #---------------------------------------------------#
+            pr = F.softmax(pr.permute(1,2,0),dim = -1).cpu().numpy()
+            #--------------------------------------#
+            #   将灰条部分截取掉
+            #--------------------------------------#
+            pr = pr[int((self.input_shape[0] - nh) // 2) : int((self.input_shape[0] - nh) // 2 + nh), \
+                    int((self.input_shape[1] - nw) // 2) : int((self.input_shape[1] - nw) // 2 + nw)]
+            #---------------------------------------------------#
+            #   进行图片的resize
+            #---------------------------------------------------#
+            pr = cv2.resize(pr, (orininal_w, orininal_h), interpolation = cv2.INTER_LINEAR)
+            #---------------------------------------------------#
+            #   取出每一个像素点的种类
+            #---------------------------------------------------#
+            pr = pr.argmax(axis=-1)
+    
+        image = Image.fromarray(np.uint8(pr))
+        return image
+
+    def get_detection_spec(self, data_path, image_id):
+        # gt_dir = os.path.join(data_path, "SegmentationClass")
+        # pred_dir = miou_out_path
+        
+        spec_path = os.path.join(data_path, "Train_Spec/" + image_id + ".mat")
+        with h5py.File(spec_path, 'r') as mat:
+            spec = np.float32(np.array(mat['cube']))
+        spec = np.transpose(spec, (2, 1, 0))
+        
+        # mask
+        mask = cv2.imread(os.path.join(data_path, "Train_Mask/", image_id + ".png"), 0)
+        mask_spec = np.expand_dims(mask, axis=0)
+        mask_spec = np.broadcast_to(mask_spec, (spec.shape[0], spec.shape[1], spec.shape[2]))
+        spec = np.where(mask_spec > 0, 128 / 255.0, spec)
+        
+        image       = self.get_miou_spec(spec)
+        
+        return image
+    
+    def get_miou_spec(self, spec):
+        
+        #---------------------------------------------------------#
+        #   在这里将图像转换成RGB图像，防止灰度图在预测时报错。
+        #   代码仅仅支持RGB图像的预测，所有其它类型的图像都会转化成RGB
+        #---------------------------------------------------------#
+        # spec [h, w, c]
+        spec = np.transpose(spec, [1, 2, 0]) # [h, w, c]
+        spec = (spec - np.min(spec)) / (np.max(spec) - np.min(spec))
+        spec = (spec * 255).astype(np.uint8)
+        
+        orininal_h, orininal_w  = spec.shape[0], spec.shape[1]
+        
+        #---------------------------------------------------------#
+        #   给图像增加灰条，实现不失真的resize
+        #   也可以直接resize进行识别
+        #---------------------------------------------------------#
+        spec_data, nw, nh  = resize_mat(spec, (self.input_shape[1], self.input_shape[0]))
+        #---------------------------------------------------------#
+        #   添加上batch_size维度
+        #---------------------------------------------------------#
+        spec_data  = np.expand_dims(np.transpose(np.array(spec_data, np.float32) / 255.0, (2, 0, 1)), 0)
+
+
+        with torch.no_grad():
+            spec_ = torch.from_numpy(spec_data)
+
+            if self.cuda:
+                spec_ = spec_.cuda()
+                
+            #---------------------------------------------------#
+            #   图片传入网络进行预测
+            #---------------------------------------------------#
+            pr = self.net(spec_)[0]
             #---------------------------------------------------#
             #   取出每一个像素点的种类
             #---------------------------------------------------#

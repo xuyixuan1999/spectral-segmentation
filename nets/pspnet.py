@@ -7,12 +7,51 @@ from torch.hub import load_state_dict_from_url
 
 model_urls = {
     'resnet50': 'https://github.com/bubbliiiing/pspnet-pytorch/releases/download/v1.0/resnet50s-a75c83cf.pth',
+    'resnet18': 'https://download.pytorch.org/models/resnet18-f37072fd.pth'
 }
 
 def conv3x3(in_planes, out_planes, stride=1):
     "3x3 convolution with padding"
     return nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride,
                      padding=1, bias=False)
+
+class BasicBlock(nn.Module):
+    expansion = 1
+
+    def __init__(self, inplanes, planes, stride=1, downsample=None, groups=1, previous_dilation=1,
+                 base_width=64, dilation=1, norm_layer=None):
+        super(BasicBlock, self).__init__()
+        if norm_layer is None:
+            norm_layer = nn.BatchNorm2d
+        if groups != 1 or base_width != 64:
+            raise ValueError('BasicBlock only supports groups=1 and base_width=64')
+        if dilation > 1:
+            raise NotImplementedError("Dilation > 1 not supported in BasicBlock")
+        self.conv1 = conv3x3(inplanes, planes, stride)
+        self.bn1 = norm_layer(planes)
+        self.relu = nn.ReLU(inplace=True)
+        self.conv2 = conv3x3(planes, planes)
+        self.bn2 = norm_layer(planes)
+        self.downsample = downsample
+        self.stride = stride
+
+    def forward(self, x):
+        identity = x
+
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.relu(out)
+
+        out = self.conv2(out)
+        out = self.bn2(out)
+
+        if self.downsample is not None:
+            identity = self.downsample(x)
+
+        out += identity
+        out = self.relu(out)
+
+        return out
 
 class Bottleneck(nn.Module):
     expansion = 4
@@ -154,7 +193,7 @@ class ResNet(nn.Module):
         return x
 
 def resnet50(pretrained=False, in_channels=3, **kwargs):
-    model = ResNet(Bottleneck, [3, 4, 6, 3], in_channels, **kwargs)
+    model = ResNet(Bottleneck, [3, 4, 6, 3], in_channels=in_channels, **kwargs)
     if pretrained:
         state_dict =  load_state_dict_from_url(model_urls['resnet50'], "./model_data")
         state_dict = {k: v for k, v in state_dict.items() if (k in model.state_dict()) and (v.size() == model.state_dict()[k].size())}
@@ -163,12 +202,25 @@ def resnet50(pretrained=False, in_channels=3, **kwargs):
         model.load_state_dict(model_dict)
     return model
 
+def resnet18(pretrained=False, in_channels=3, **kwargs):
+    model = ResNet(BasicBlock, [2, 2, 2, 2], in_channels=in_channels, **kwargs)
+    if pretrained:
+        state_dict =  load_state_dict_from_url(model_urls['resnet18'], "./model_data")
+        state_dict = {k: v for k, v in state_dict.items() if (k in model.state_dict()) and (v.size() == model.state_dict()[k].size())}
+        model_dict = model.state_dict()
+        model_dict.update(state_dict)
+        model.load_state_dict(model_dict)
+    return model
+
 
 class Resnet(nn.Module):
-    def __init__(self, dilate_scale=8, pretrained=True, in_channels=3):
+    def __init__(self, dilate_scale=8, pretrained=True, in_channels=3, backbone="resnet50"):
         super(Resnet, self).__init__()
         from functools import partial
-        model = resnet50(pretrained, in_channels=in_channels)
+        if backbone=="resnet50":
+            model = resnet50(pretrained, in_channels=in_channels)
+        elif backbone=="resnet18":
+            model = resnet18(pretrained, in_channels=in_channels)
 
         #--------------------------------------------------------------------------------------------#
         #   根据下采样因子修改卷积的步长与膨胀系数
@@ -254,13 +306,17 @@ class _PSPModule(nn.Module):
 
 
 class PSPNet(nn.Module):
-    def __init__(self, num_classes, downsample_factor, backbone="resnet50", pretrained=True, aux_branch=True):
+    def __init__(self, num_classes, downsample_factor=8, in_channels=3, backbone="resnet50", pretrained=True, aux_branch=False):
         super(PSPNet, self).__init__()
         norm_layer = nn.BatchNorm2d
         if backbone=="resnet50":
-            self.backbone = Resnet(downsample_factor, pretrained)
+            self.backbone = Resnet(downsample_factor, pretrained, in_channels, backbone="resnet50")
             aux_channel = 1024
             out_channel = 2048
+        elif backbone=="resnet18":
+            self.backbone = Resnet(downsample_factor, pretrained, in_channels, backbone="resnet18")
+            aux_channel = 256
+            out_channel = 512
         # elif backbone=="mobilenet":
         #     #----------------------------------#
         #     #   获得两个特征层
@@ -325,8 +381,8 @@ class PSPNet(nn.Module):
                     m.bias.data.zero_()
 
 if __name__ == "__main__":
-    model = PSPNet(14, 8, backbone="resnet50", pretrained=True, aux_branch=False)
-    input = torch.randn(1, 3, 416, 416)
+    model = PSPNet(14, 8, in_channels=25, backbone="resnet18", pretrained=True, aux_branch=False)
+    input = torch.randn(1, 25, 416, 416)
     model.eval()
     with torch.no_grad():
         output = model(input)

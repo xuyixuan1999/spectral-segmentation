@@ -12,7 +12,7 @@ SwinUnet_m0 = {
 }
 
 SwinUnet_m1 = {
-    "embed_dim":128,
+    "embed_dim":96,
     "depths":[2, 2, 6, 2],
     "num_heads":[3, 6, 12, 24],
 }
@@ -99,7 +99,7 @@ class WindowAttention(nn.Module):
         # get pair-wise relative position index for each token inside the window
         coords_h = torch.arange(self.window_size[0])
         coords_w = torch.arange(self.window_size[1])
-        coords = torch.stack(torch.meshgrid([coords_h, coords_w]))  # 2, Wh, Ww
+        coords = torch.stack(torch.meshgrid([coords_h, coords_w], indexing='ij'))  # 2, Wh, Ww
         coords_flatten = torch.flatten(coords, 1)  # 2, Wh*Ww
         relative_coords = coords_flatten[:, :, None] - coords_flatten[:, None, :]  # 2, Wh*Ww, Wh*Ww
         relative_coords = relative_coords.permute(1, 2, 0).contiguous()  # Wh*Ww, Wh*Ww, 2
@@ -775,10 +775,8 @@ class SwinUnet(nn.Module):
                                 window_size=13,
                                 in_chans=in_channels,
                                 num_classes=self.num_classes,
-                                embed_dim=96,
-                                depths=[2, 2, 6, 2],
-                                num_heads=[3, 6, 12, 24],
-                                mlp_ratio=4)
+                                mlp_ratio=4, 
+                                **kwargs)
 
     def forward(self, x):
         if x.size()[1] == 1:
