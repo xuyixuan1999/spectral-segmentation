@@ -324,7 +324,7 @@ def fit_one_epoch_fusion(opt, model_train, model, loss_history, eval_callback, o
 
             loss.backward()
             #  BN 稀疏化 (L1 正则化)
-            if opt.prune and not opt.fine_tune:
+            if opt.prune and not opt.fine_tune and not opt.sparsity:
                 updateBN(model_train, epoch=epoch+1, epochs=opt.unfreeze_epoch, sr=opt.prune_sr)
             optimizer.step()
         else:
@@ -421,7 +421,7 @@ def fit_one_epoch_fusion(opt, model_train, model, loss_history, eval_callback, o
         pbar.close()
         print('Finish Validation')
         loss_history.append_loss(epoch + 1, total_loss/ epoch_step, val_loss/ epoch_step_val, get_lr(optimizer), 
-                                 model=model_train if (opt.prune is True and not opt.fine_tune) else None)
+                                 model=model_train if (opt.prune is True and not opt.fine_tune and not opt.sparsity) else None)
         eval_callback.on_epoch_end_fusion(epoch + 1, model_train)
         print('Epoch:'+ str(epoch+1) + '/' + str(opt.unfreeze_epoch))
         print('Total Loss: %.5f || Val Loss: %.5f ' % (total_loss / epoch_step, val_loss / epoch_step_val))
@@ -430,18 +430,18 @@ def fit_one_epoch_fusion(opt, model_train, model, loss_history, eval_callback, o
         #   保存权值
         #-----------------------------------------------#
         if (epoch + 1) % opt.save_period == 0 or epoch + 1 == opt.unfreeze_epoch:
-            if opt.prune is True and opt.fine_tune:
+            if (opt.prune is True and opt.fine_tune) or opt.sparsity is True:
                 torch.save(model, os.path.join(opt.save_dir, 'ep%03d-loss%.3f-val_loss%.3f.pth'%((epoch + 1), total_loss / epoch_step, val_loss / epoch_step_val)))
             else:
                 torch.save(model.state_dict(), os.path.join(opt.save_dir, 'ep%03d-loss%.3f-val_loss%.3f.pth'%((epoch + 1), total_loss / epoch_step, val_loss / epoch_step_val)))
 
         if len(loss_history.val_loss) <= 1 or (val_loss / epoch_step_val) <= min(loss_history.val_loss):
             print('Save best model to best_epoch_weights.pth')
-            if opt.prune is True and opt.fine_tune:
+            if (opt.prune is True and opt.fine_tune) or opt.sparsity is True:
                 torch.save(model, os.path.join(opt.save_dir, "best_epoch_weights.pth"))
             else:
                 torch.save(model.state_dict(), os.path.join(opt.save_dir, "best_epoch_weights.pth"))
-        if opt.prune is True and opt.fine_tune:
+        if (opt.prune is True and opt.fine_tune) or opt.sparsity is True:
             torch.save(model, os.path.join(opt.save_dir, "last_epoch_weights.pth"))
         else:
             torch.save(model.state_dict(), os.path.join(opt.save_dir, "last_epoch_weights.pth"))

@@ -5,7 +5,126 @@ import torch
 from PIL import Image
 import cv2
 import time
+import tqdm
+from copy import deepcopy
+import inspect
+import logging
 
+# Quantization Toolkit
+from pytorch_quantization import nn as quant_nn
+from pytorch_quantization import calib
+
+def prune_trained_model_custom(model, optimizer, allow_recompute_mask=False, allow_permutation=True,
+                               compute_sparse_masks=True):
+    from apex.contrib.sparsity import ASP
+    asp = ASP()
+    asp.init_model_for_pruning(
+        model,
+        mask_calculator="m4n2_1d",
+        verbosity=2,
+        whitelist=[torch.nn.Linear, torch.nn.Conv2d],
+        allow_recompute_mask=allow_recompute_mask,
+        allow_permutation=allow_permutation
+    )
+    asp.init_optimizer_for_pruning(optimizer)
+    if compute_sparse_masks:
+        asp.compute_sparse_masks()
+    return asp
+
+def export_onnx(model, onnx_filename, 
+                input_name = ['spec', 'rgb'], 
+                output_name=['output'], 
+                input_shape=416, 
+                opset_version=11, 
+                verbose=False,
+                dynamic_axes={'spec': {0: 'batch_size'},
+                                'rgb': {0: 'batch_size'},
+                                'output': {0: 'batch_size'}},
+                do_constant_folding=True, 
+                trace_model=False):
+    model.cuda().eval()
+    # We have to shift to pytorch's fake quant ops before exporting the model to ONNX
+    quant_nn.TensorQuantizer.use_fb_fake_quant = True
+
+    # Export ONNX for multiple batch sizes
+    print("Creating ONNX file: " + onnx_filename)
+    dummy_input_rgb = torch.randn(1, 3, input_shape, input_shape, device="cuda")
+    dummy_input_spec = torch.randn(1, 25, input_shape, input_shape, device="cuda")
+    dummy_input = (dummy_input_spec, dummy_input_rgb)
+    try:
+        # print("Exporting ONNX model with input {} to {} with opset {}!".format(dummy_input.shape, onnx_filename, opset_version))
+        model_tmp = model
+        if isinstance(model, torch.nn.DataParallel) or isinstance(model, torch.nn.parallel.DistributedDataParallel):
+            #  '.module' is necessary here because model is wrapped in torch.nn.DataParallel
+            model_tmp = model.module
+        if trace_model:
+            model_tmp = torch.jit.trace(model_tmp, dummy_input)
+        torch.onnx.export(
+            model_tmp, dummy_input, onnx_filename,
+            verbose=verbose,
+            input_names=input_name,
+            output_names=output_name,
+            opset_version=opset_version,
+            do_constant_folding=do_constant_folding,
+            dynamic_axes=dynamic_axes
+        )
+    except ValueError:
+        print("Failed to export to ONNX")
+        return False
+
+    return True
+
+def collect_stats(model, data_loader, num_batches):
+    """Feed data to the network and collect statistic"""
+
+    # Enable calibrators
+    for name, module in model.named_modules():
+        if isinstance(module, quant_nn.TensorQuantizer):
+            if module._calibrator is not None:
+                module.disable_quant()
+                module.enable_calib()
+            else:
+                module.disable()
+
+    progress_bar = tqdm.tqdm(total=len(data_loader), leave=True, desc='Evaluation Progress')
+    for i, batch in enumerate(data_loader):
+        hypers, rgbs, pngs, labels = batch
+        hypers  = hypers.cuda()
+        rgbs    = rgbs.cuda()
+        model(hypers, rgbs)  # .cuda())
+        progress_bar.update()
+        if i >= num_batches:
+            break
+    progress_bar.update()
+
+    # Disable calibrators
+    for name, module in model.named_modules():
+        if isinstance(module, quant_nn.TensorQuantizer):
+            if module._calibrator is not None:
+                module.enable_quant()
+                module.disable_calib()
+            else:
+                module.enable()
+
+def compute_amax(model, **kwargs):
+    """Load calib result"""
+    for name, module in model.named_modules():
+        if isinstance(module, quant_nn.TensorQuantizer):
+            if module._calibrator is not None:
+                if isinstance(module._calibrator, calib.MaxCalibrator):
+                    module.load_calib_amax(strict=False)
+                else:
+                    module.load_calib_amax(strict=False, **kwargs)
+    # model.cuda()
+
+def updateBN(model, epoch, epochs, sr=0.001):
+    srtmp = sr * (1 - 0.99 * epoch / epochs)
+    # ignore_bn_list = ['backbone']
+    for name, m in model.named_modules():
+        if isinstance(m, torch.nn.BatchNorm2d):
+            m.weight.grad.data.add_(srtmp * torch.sign(m.weight.data))  # L1
+            m.bias.grad.data.add_(sr * torch.sign(m.bias.data))  # L1
+            
 class Timer():
     def __init__(self, start_epoch, end_epoch):
         self.epoch = start_epoch + 1
@@ -132,20 +251,21 @@ def print_options(opt):
     It will save options into a text file / [checkpoints_dir] / opt.txt
     """
     message = ''
-    message += '-' * 90
+    message += '-' * 110
     message += '\n'
-    message += '|%25s | %60s|\n' % ('keys', 'values')
-    message += '-' * 90
+    message += '|%25s | %-80s|\n' % ('keys', 'values')
+    message += '-' * 110
     message += '\n'
     for k, v in sorted(vars(opt).items()):
-        message += '|%25s | %60s|\n' % (str(k), str(v))
-    message += '-' * 90
+        message += '|%25s | %-80s|\n' % (str(k), str(v))
+    message += '-' * 110
     print(message)
     # save to the disk
     file_name = os.path.join(opt.save_dir, 'opt.txt')
     with open(file_name, 'wt') as opt_file:
         opt_file.write(message)
         opt_file.write('\n')
+
         
 
 def download_weights(backbone, model_dir="./model_data"):

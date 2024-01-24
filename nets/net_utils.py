@@ -251,7 +251,7 @@ class FFN_BN_Conv(nn.Module):
         x = self.pw2(self.act(self.pw1(x)))
         return x
         
-class Conv2d_BN(torch.nn.Sequential):
+class Conv2d_BN(nn.Module):
     def __init__(self, a, b, ks=1, stride=1, pad=0, dilation=1,
                  groups=1, bn_weight_init=1):
         super().__init__()
@@ -264,7 +264,7 @@ class Conv2d_BN(torch.nn.Sequential):
     def forward(self, input):
         return self.bn(self.conv(input))
 
-class BN_Conv2d(torch.nn.Sequential):
+class BN_Conv2d(nn.Module):
     def __init__(self, a, b, ks=1, stride=1, pad=0, dilation=1,
                  groups=1, bn_weight_init=1):
         super().__init__()

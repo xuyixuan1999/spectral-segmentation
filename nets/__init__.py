@@ -14,6 +14,7 @@ from nets.upernet import UPerNet
 from nets.segformer import Segformer
 from nets.setr import SETRModel
 from nets.pspnet import PSPNet
+from nets.newafft import NewAFFT
 
 def generate_model(model_name, num_classes, in_channels=3, pretrained=False, backbone='resnet18', cfg=None):
     if model_name == 'unet':
@@ -46,6 +47,8 @@ def generate_model(model_name, num_classes, in_channels=3, pretrained=False, bac
         model = TwoStreamModel(num_classes, pretrained, backbone)
     elif model_name == 'afft':
         model = AFFT(num_classes, pretrained, backbone)
+    elif model_name == 'newafft':
+        model = NewAFFT(num_classes, pretrained, backbone)
     elif model_name == 'efficienthybrid':
         model = EfficientHybrid(num_classes, pretrained, backbone, **eval(cfg))
     elif model_name == 'esanet':

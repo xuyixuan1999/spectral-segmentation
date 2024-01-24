@@ -26,7 +26,7 @@ def initialize_logger(file_dir):
     formatter = logging.Formatter('%(asctime)s - %(message)s', "%Y-%m-%d %H:%M:%S")
     fhandler.setFormatter(formatter)
     logger.addHandler(fhandler)
-    logger.setLevel(logging.INFO)
+    logger.setLevel(logging.WARNING)
     return logger
 
 class LossHistory():
@@ -48,7 +48,7 @@ class LossHistory():
         except:
             pass
 
-    def append_loss(self, epoch, loss, val_loss, lr):
+    def append_loss(self, epoch, loss, val_loss, lr, model=None):
         if not os.path.exists(self.log_dir):
             os.makedirs(self.log_dir)
 
@@ -56,11 +56,25 @@ class LossHistory():
 
         self.val_loss.append(val_loss)
         
-        self.logger.info("Epoch[%04d], Learning Rate : %.9f, Train Loss : %.9f, Val Loss : %.9f" % (epoch, lr, loss, val_loss))
+        self.logger.warning("Epoch[%04d], Learning Rate : %.9f, Train Loss : %.9f, Val Loss : %.9f", epoch, lr, loss, val_loss)
             
         self.writer.add_scalar('loss', loss, epoch)
 
         self.writer.add_scalar('val_loss', val_loss, epoch)
+        
+        # prune of sparse bn visualization
+        if model is not None:
+            bn_weight = []
+            bn_bias = []
+            bn_hist = []
+            for name, m in model.named_modules():
+                if isinstance(m, torch.nn.BatchNorm2d):
+                    bn_hist.append(m.weight.data.clone().cpu().view(-1))
+                    bn_weight.append(m.weight.data.clone().cpu().sum() / m.num_features)
+                    bn_bias.append(m.bias.data.clone().cpu().sum() / m.num_features)
+            self.writer.add_scalar("val/bn_weight", sum(bn_weight) / len(bn_weight), epoch)
+            self.writer.add_scalar("val/bn_bias", sum(bn_bias) / len(bn_bias), epoch)
+            self.writer.add_histogram("bn_hist", torch.cat(bn_hist, dim=0), epoch)
             
         self.loss_plot()
 
@@ -484,7 +498,7 @@ class EvalCallback():
             self.epoches.append(epoch)
 
             with open(os.path.join(self.log_dir, "epoch_miou.txt"), 'a') as f:
-                f.write(str(temp_miou))
+                f.write('Epoch[%03d]: '%epoch + str(temp_miou))
                 f.write("\n")
             
             plt.figure()
