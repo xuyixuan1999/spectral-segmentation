@@ -1,12 +1,14 @@
 import torch
 import torch.nn as nn
 import torch_pruning as tp
-from nets.newafft import NewAFFT
+from nets import generate_model
 
 class Model(nn.Module):
-    def __init__(self, model_path, pruned_path=None) -> None:
+    def __init__(self, model_name, model_path, in_channels=3, pruned_path=None) -> None:
         super().__init__()
-        self.model = NewAFFT(num_classes=14, pretrained=False, backbone='resnet18')
+        # self.model = NewAFFT(num_classes=14, pretrained=False, backbone='resnet18')
+        self.model = generate_model(model_name, num_classes=14, in_channels=in_channels, pretrained=False, backbone='resnet18')
+        
         if pruned_path is not None:
             self.model.load_state_dict(torch.load(model_path, map_location='cpu'))
             example_input = (torch.randn((1, 25, 416, 416)), 
@@ -20,7 +22,7 @@ class Model(nn.Module):
             self.model = torch.load(model_path, map_location='cpu')
         
     
-    def forward(self, spec, rgb):
-        x = self.model(spec, rgb)
+    def forward(self, *input):
+        x = self.model(*input)
         x = x.permute(0, 2, 3, 1).softmax(dim=-1)
         return x

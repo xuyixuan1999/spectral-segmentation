@@ -5,7 +5,7 @@ import torch.nn as nn
 from timm.models.layers import SqueezeExcite
 from nets.resnet import *
 from nets.vgg import *
-from nets.net_utils import Conv2d_BN, CDSM, SPPF, AttentionModule
+from nets.net_utils import Conv2d_BN, SPPF, AttentionModule
 
 class DEM(nn.Module):
     def __init__(self, dim):
