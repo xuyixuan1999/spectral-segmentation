@@ -3,7 +3,7 @@ import datetime
 from PIL import Image
 from tqdm import tqdm
 
-from unet import Unet, Fusion
+from unet import Unet, Fusion, TrtUnet
 from utils.utils_metrics import compute_mIoU, show_results
 
 '''
@@ -14,17 +14,25 @@ from utils.utils_metrics import compute_mIoU, show_results
 '''
 if __name__ == "__main__":
     config = {
-        "model_name"         : 'unet',
+        "model_name"         : 'newafft',
         #-------------------------------------------------------------------#
         #   model_path指向logs文件夹下的权值文件
         #   训练好后logs文件夹下存在多个权值文件，选择验证集损失较低的即可。
         #   验证集损失较低不代表miou较高，仅代表该权值在验证集上泛化性能较好。
         #-------------------------------------------------------------------#
-        "model_path"    : 'logs/2023_12_20_06_54_05_rec_3band_multi/best_epoch_weights.pth',
+        "is_pruned"      : False,
+        
+        "pruned_path"   : '',
+        
+        "model_path"    : 'logs/newafft/2024_01_21_09_49_29_fixSW_nopre_att-up/last_epoch_weights.pth',
         #--------------------------------#
         #   所需要区分的类的个数+1
         #--------------------------------#
         "num_classes"   : 14,
+        #--------------------------------#
+        #  channel数
+        #--------------------------------#
+        "in_channels"   : 25,
         #--------------------------------#
         #   所使用的的主干网络：vgg、resnet50   
         #--------------------------------#
@@ -54,30 +62,27 @@ if __name__ == "__main__":
     #   miou_mode为2代表仅仅计算miou。
     #---------------------------------------------------------------------------#
     miou_mode       = 0
+    
+    infer_type      = 'torch' # 'torch' or 'trt'
+    
+    model_type = 'fusion'
     #------------------------------#
     #   分类个数+1、如2+1
     #------------------------------#
     num_classes     = 14
+    
+    output_name     = 'nature_newafft'
+    
     #--------------------------------------------#
     #   区分的种类，和json_to_dataset里面的一样
     #--------------------------------------------#
-    '''
-    _background_
-    desert camouflage net
-    desert two-color camouflage net
-    desert three-color camouflage net
-    desert grass camouflage net
-    anti-infrared camouflage net
-    forest three-color grass camouflage net
-    forest two-color glass camouflage net
-    forest two-color optical camouflage net
-    forest three-color optical camouflage net
-    forest digital camouflage net
-    desert camouflage people
-    forest camouflage people
-    camouflage plate
-    '''
-    name_classes    = ["_background", "desert camouflage net", "desert two-color camouflage net", "desert three-color camouflage net", "desert grass camouflage net", "anti-infrared camouflage net", "forest three-color grass camouflage net", "forest two-color glass camouflage net", "forest two-color optical camouflage net", "forest three-color optical camouflage net", "forest digital camouflage net", "desert camouflage people", "forest camouflage people", "camouflage plate"]
+
+    name_classes    = ["_background", "desert camouflage net", "desert two-color camouflage net", 
+                       "desert three-color camouflage net", "desert grass camouflage net", 
+                       "anti-infrared camouflage net", "forest three-color grass camouflage net", 
+                       "forest two-color glass camouflage net", "forest two-color optical camouflage net", 
+                       "forest three-color optical camouflage net", "forest digital camouflage net", 
+                       "desert camouflage people", "forest camouflage people", "camouflage plate"]
 
     #-------------------------------------------------------#
     #   指向VOC数据集所在的文件夹
@@ -88,7 +93,7 @@ if __name__ == "__main__":
     image_ids       = open(os.path.join(VOCdevkit_path, "ImageSets/Segmentation/val.txt"),'r').read().splitlines() 
     gt_dir          = os.path.join(VOCdevkit_path, "SegmentationClass/")
     time_str        = datetime.datetime.strftime(datetime.datetime.now(),'%Y_%m_%d_%H_%M_%S') 
-    miou_out_path   = os.path.join('output', time_str)
+    miou_out_path   = os.path.join('output', time_str + '_' + output_name)
     pred_dir        = os.path.join(miou_out_path, 'detection-results')
 
     if miou_mode == 0 or miou_mode == 1:
@@ -97,15 +102,22 @@ if __name__ == "__main__":
             
         print("Load model.")
         # unet = Unet()
-        pre_net = Fusion(**config)
+        if infer_type == 'torch':
+            pre_net = Fusion(**config)
+        elif infer_type == 'trt':
+            pre_net = TrtUnet(**config)
         print("Load model done.")
 
         print("Get predict result.")
         for image_id in tqdm(image_ids):
-            # image_path  = os.path.join(VOCdevkit_path, "JPEGImages/"+image_id+".jpg")
-            # image       = Image.open(image_path)
-            # image       = unet.get_miou_png(image)
-            image         = pre_net.get_detection_rgb(VOCdevkit_path, image_id)
+            if model_type == 'rgb':
+                image         = pre_net.get_detection_rgb(VOCdevkit_path, image_id)
+            elif model_type == 'spec':
+                image         = pre_net.get_detection_spec(VOCdevkit_path, image_id)
+            elif model_type == 'fusion':
+                image         = pre_net.get_detection_fusion(VOCdevkit_path, image_id)
+            else:
+                raise NotImplementedError
             image.save(os.path.join(pred_dir, image_id + ".png"))
         print("Get predict result done.")
 

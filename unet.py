@@ -9,10 +9,12 @@ import torch.nn.functional as F
 from PIL import Image
 from torch import nn
 import h5py
+import torch_pruning as tp
 
 # from nets.unet import Unet as unet
 from nets import generate_model
 from utils.utils import cvtColor, preprocess_input, resize_image, show_config, resize_mat
+from infer.trtinfer import TrtInfer
 
 
 #--------------------------------------------#
@@ -232,7 +234,7 @@ class Unet(object):
             #---------------------------------------------------#
             #   取出每一个像素点的种类
             #---------------------------------------------------#
-            pr = F.softmax(pr.permute(1,2,0),dim = -1).cpu().numpy().argmax(axis=-1)
+            pr = F.softmax(pr.permute(1,2,0),dim = -1).cpu().numpy()
             #--------------------------------------#
             #   将灰条部分截取掉
             #--------------------------------------#
@@ -249,7 +251,14 @@ class Unet(object):
                 #---------------------------------------------------#
                 #   取出每一个像素点的种类
                 #---------------------------------------------------#
-                pr = F.softmax(pr.permute(1,2,0),dim = -1).cpu().numpy().argmax(axis=-1)
+                try:
+                    self.net = self.net.module
+                except:
+                    pass
+                if self.net.__class__.__name__ == 'NewAFFT':
+                    pr = pr.cpu().numpy()
+                else:
+                    pr = F.softmax(pr.permute(1,2,0),dim = -1).cpu().numpy()
                 #--------------------------------------#
                 #   将灰条部分截取掉
                 #--------------------------------------#
@@ -622,11 +631,19 @@ class Fusion(object):
     #---------------------------------------------------#
     def generate(self, onnx=False):
         # self.net = unet(num_classes = self.num_classes, backbone=self.backbone)
-        self.net = generate_model(model_name=self.model_name, num_classes=self.num_classes, backbone=self.backbone, in_channels=self.in_channels, pretrained=False)
-
         device      = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.net = generate_model(model_name=self.model_name, num_classes=self.num_classes, backbone=self.backbone, in_channels=self.in_channels, pretrained=False).to(device)
+
         if self.is_pruned:
-            self.net = torch.load(self.model_path, map_location=device)
+            if self.pruned_path != '':
+                DG = tp.DependencyGraph().build_dependency(self.net, (torch.randn((1, 25, 416, 416), device=device),torch.randn((1, 3, 416, 416), device=device)))
+                state_dict = torch.load(self.pruned_path, map_location=device)
+                DG.load_pruning_history(state_dict['pruning'])
+                self.net.load_state_dict(state_dict['model'])
+                
+                self.net.load_state_dict(torch.load(self.model_path, map_location=device).state_dict())
+            else:
+                self.net = torch.load(self.model_path, map_location=device)
         else:
             self.net.load_state_dict(torch.load(self.model_path, map_location=device))
         self.net    = self.net.eval()
@@ -637,7 +654,7 @@ class Fusion(object):
                 self.net = self.net.cuda()
 
     #---------------------------------------------------#
-    #   检测图片
+    #   检测单张RGB图片
     #---------------------------------------------------#
     def detect_image_rgb(self, image, mask=None, count=False, name_classes=None):
         '''
@@ -753,6 +770,9 @@ class Fusion(object):
         
         return image
 
+    #---------------------------------------------------#
+    #   检测单张融合图像
+    #---------------------------------------------------#
     def detect_image_fusion(self, spec, rgb, mask=None, count=False, name_classes=None):
         '''
         spec: numpy array shape is [c, h, w] and [0, 1]
@@ -877,6 +897,9 @@ class Fusion(object):
         
         return image
 
+    #---------------------------------------------------#
+    #   检测单张光谱图像
+    #---------------------------------------------------#
     def detect_image_spec(self, spec, rgb, mask=None, count=False, name_classes=None):
         '''
         spec: numpy array shape is [c, h, w] and [0, 1]
@@ -992,6 +1015,9 @@ class Fusion(object):
         
         return image
 
+    #---------------------------------------------------#
+    #   检测多张融合图像
+    #---------------------------------------------------#
     def get_detection_fusion(self, data_path, image_id):
         # gt_dir = os.path.join(data_path, "SegmentationClass")
         # pred_dir = miou_out_path
@@ -1074,6 +1100,9 @@ class Fusion(object):
         image = Image.fromarray(np.uint8(pr))
         return image
 
+    #---------------------------------------------------#
+    #   检测多张RGB图像
+    #---------------------------------------------------#
     def get_detection_rgb(self, data_path, image_id):
         rgb_path = os.path.join(data_path, "JPEGImages/" + image_id + ".jpg")
         rgb = np.array(Image.open(rgb_path), dtype=np.uint8)
@@ -1122,6 +1151,9 @@ class Fusion(object):
         image = Image.fromarray(np.uint8(pr))
         return image
 
+    #---------------------------------------------------#
+    #   检测多张光谱图像
+    #---------------------------------------------------#
     def get_detection_spec(self, data_path, image_id):
         # gt_dir = os.path.join(data_path, "SegmentationClass")
         # pred_dir = miou_out_path
@@ -1192,6 +1224,138 @@ class Fusion(object):
             #   取出每一个像素点的种类
             #---------------------------------------------------#
             pr = pr.argmax(axis=-1)
+    
+        image = Image.fromarray(np.uint8(pr))
+        return image
+    
+class TrtUnet(object):
+    def __init__(self, **kwargs) -> None:
+        for name, value in kwargs.items():
+            setattr(self, name, value)
+        
+        if self.num_classes <= 21:
+            self.colors = [ (0, 0, 0), (128, 0, 0), (0, 128, 0), (128, 128, 0), (0, 0, 128), (128, 0, 128), (0, 128, 128), 
+                            (128, 128, 128), (64, 0, 0), (192, 0, 0), (64, 128, 0), (192, 128, 0), (64, 0, 128), (192, 0, 128), 
+                            (64, 128, 128), (192, 128, 128), (0, 64, 0), (128, 64, 0), (0, 192, 0), (128, 192, 0), (0, 64, 128), 
+                            (128, 64, 12)]
+        else:
+            hsv_tuples = [(x / self.num_classes, 1., 1.) for x in range(self.num_classes)]
+            self.colors = list(map(lambda x: colorsys.hsv_to_rgb(*x), hsv_tuples))
+            self.colors = list(map(lambda x: (int(x[0] * 255), int(x[1] * 255), int(x[2] * 255)), self.colors))
+
+        self.net = TrtInfer(self.model_path)
+    
+    def get_detection_fusion(self, data_path, image_id):
+        # gt_dir = os.path.join(data_path, "SegmentationClass")
+        # pred_dir = miou_out_path
+        rgb_path = os.path.join(data_path, "JPEGImages/" + image_id + ".jpg")
+        rgb = np.array(Image.open(rgb_path), dtype=np.uint8)
+        
+        spec_path = os.path.join(data_path, "Train_Spec/" + image_id + ".mat")
+        with h5py.File(spec_path, 'r') as mat:
+            spec = np.float32(np.array(mat['cube']))
+        spec = np.transpose(spec, (2, 1, 0))
+        
+        # mask
+        mask = cv2.imread(os.path.join(data_path, "Train_Mask/", image_id + ".png"), 0)
+        mask_rgb = np.expand_dims(mask, axis=2)
+        mask_rgb = np.broadcast_to(mask_rgb, (rgb.shape[0], rgb.shape[1], rgb.shape[2]))
+        rgb  = np.where(mask_rgb > 0, 128, rgb)
+        
+        mask_spec = np.expand_dims(mask, axis=0)
+        mask_spec = np.broadcast_to(mask_spec, (spec.shape[0], spec.shape[1], spec.shape[2]))
+        spec = np.where(mask_spec > 0, 128 / 255.0, spec)
+        
+        image       = self.get_miou_fusion(spec, rgb)
+        
+        return image
+    
+    def get_miou_fusion(self, spec, rgb):
+        
+        #---------------------------------------------------------#
+        #   在这里将图像转换成RGB图像，防止灰度图在预测时报错。
+        #   代码仅仅支持RGB图像的预测，所有其它类型的图像都会转化成RGB
+        #---------------------------------------------------------#
+        # spec [h, w, c]
+        spec = np.transpose(spec, [1, 2, 0]) # [h, w, c]
+        spec = (spec - np.min(spec)) / (np.max(spec) - np.min(spec))
+        spec = (spec * 255).astype(np.uint8)
+        
+        orininal_h  = np.array(rgb).shape[0]
+        orininal_w  = np.array(rgb).shape[1]
+        #---------------------------------------------------------#
+        #   给图像增加灰条，实现不失真的resize
+        #   也可以直接resize进行识别
+        #---------------------------------------------------------#
+        spec_data, nw, nh  = resize_mat(spec, (self.input_shape[1], self.input_shape[0]))
+        rgb_data, _, _ = resize_mat(rgb, (self.input_shape[1], self.input_shape[0]))
+        #---------------------------------------------------------#
+        #   添加上batch_size维度
+        #---------------------------------------------------------#
+        spec_data  = np.expand_dims(np.transpose(np.array(spec_data, np.float32) / 255.0, (2, 0, 1)), 0)
+        rgb_data  = np.expand_dims(np.transpose(np.array(rgb_data, np.float32) / 255.0, (2, 0, 1)), 0)
+
+        #---------------------------------------------------#
+        #   图片传入网络进行预测
+        #---------------------------------------------------#
+        pr = self.net.forward([spec_data, rgb_data])[0][0]
+        #--------------------------------------#
+        #   将灰条部分截取掉
+        #--------------------------------------#
+        pr = pr[int((self.input_shape[0] - nh) // 2) : int((self.input_shape[0] - nh) // 2 + nh), \
+                int((self.input_shape[1] - nw) // 2) : int((self.input_shape[1] - nw) // 2 + nw)]
+        #---------------------------------------------------#
+        #   进行图片的resize
+        #---------------------------------------------------#
+        pr = cv2.resize(pr, (orininal_w, orininal_h), interpolation = cv2.INTER_LINEAR)
+        #---------------------------------------------------#
+        #   取出每一个像素点的种类
+        #---------------------------------------------------#
+        pr = pr.argmax(axis=-1)
+    
+        image = Image.fromarray(np.uint8(pr))
+        return image
+    
+    def get_detection_rgb(self, data_path, image_id):
+        
+        rgb_path = os.path.join(data_path, "JPEGImages/" + image_id + ".jpg")
+        rgb = np.array(Image.open(rgb_path), dtype=np.uint8)
+        # mask
+        # mask = cv2.imread(os.path.join(data_path, "Train_Mask/", image_id + ".png"), 0)
+        # mask_rgb = np.expand_dims(mask, axis=2)
+        # mask_rgb = np.broadcast_to(mask_rgb, (rgb.shape[0], rgb.shape[1], rgb.shape[2]))
+        # rgb  = np.where(mask_rgb > 0, 128, rgb)
+        
+        image       = self.get_miou_rgb(rgb)
+        
+        return image
+    
+    def get_miou_rgb(self, image):
+        
+        orininal_h  = np.array(image).shape[0]
+        orininal_w  = np.array(image).shape[1]
+
+        image_data, nw, nh  = resize_mat(image, (self.input_shape[1], self.input_shape[0]))
+
+        image_data  = np.expand_dims(np.transpose(np.array(image_data, np.float32) / 255.0, (2, 0, 1)), 0)
+
+        #---------------------------------------------------#
+        #   图片传入网络进行预测
+        #---------------------------------------------------#
+        pr = self.net.forward([image_data])[0][0]
+        #--------------------------------------#
+        #   将灰条部分截取掉
+        #--------------------------------------#
+        pr = pr[int((self.input_shape[0] - nh) // 2) : int((self.input_shape[0] - nh) // 2 + nh), \
+                int((self.input_shape[1] - nw) // 2) : int((self.input_shape[1] - nw) // 2 + nw)]
+        #---------------------------------------------------#
+        #   进行图片的resize
+        #---------------------------------------------------#
+        pr = cv2.resize(pr, (orininal_w, orininal_h), interpolation = cv2.INTER_LINEAR)
+        #---------------------------------------------------#
+        #   取出每一个像素点的种类
+        #---------------------------------------------------#
+        pr = pr.argmax(axis=-1)
     
         image = Image.fromarray(np.uint8(pr))
         return image

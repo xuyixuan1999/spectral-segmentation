@@ -184,7 +184,8 @@ def resize_mat(mat, size):
     dx = (w-nw)//2
     dy = (h-nh)//2
     # resize multichannel
-    mat = resize_multichannel_image(mat, (nh, nw))
+    # mat = resize_multichannel_image(mat, (nh, nw))
+    mat = cv2.resize(mat, (nw, nh), interpolation = cv2.INTER_LINEAR)
     new_mat = np.ones((h, w, ic), dtype=mat.dtype) * 128
     new_mat[dy:dy+nh, dx:dx+nw, :] = mat
     return new_mat, nw, nh
