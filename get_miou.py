@@ -65,7 +65,7 @@ if __name__ == "__main__":
     
     infer_type      = 'torch' # 'torch' or 'trt'
     
-    model_type = 'fusion'
+    model_type = 'fusion' 
     #------------------------------#
     #   分类个数+1、如2+1
     #------------------------------#

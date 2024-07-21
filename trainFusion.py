@@ -165,14 +165,14 @@ if __name__ == "__main__":
             DG.load_pruning_history(state_dict['pruning'])
             model.load_state_dict(state_dict['model'])
     elif opt.prune and not opt.sparsity: # 稠密模型剪枝训练或剪枝后微调
-        if opt.fine_tune:
-            import torch_pruning as tp
-            example_input = (torch.randn((1, opt.input_shape[1], opt.input_shape[2], opt.input_shape[3])), 
-                             torch.randn((1, opt.input_shape[0], opt.input_shape[2], opt.input_shape[3])))
-            DG = tp.DependencyGraph().build_dependency(model, example_input)
-            state_dict = torch.load(opt.pruned_model_path, map_location=device)
-            DG.load_pruning_history(state_dict['pruning'])
-            model.load_state_dict(state_dict['model'])
+        # if opt.fine_tune:
+        import torch_pruning as tp
+        example_input = (torch.randn((1, opt.input_shape[1], opt.input_shape[2], opt.input_shape[3])), 
+                            torch.randn((1, opt.input_shape[0], opt.input_shape[2], opt.input_shape[3])))
+        DG = tp.DependencyGraph().build_dependency(model, example_input)
+        state_dict = torch.load(opt.pruned_model_path, map_location=device)
+        DG.load_pruning_history(state_dict['pruning'])
+        model.load_state_dict(state_dict['model'])
     elif not opt.prune and opt.sparsity: # 稠密模型稀疏训练
         pass
     elif not opt.prune and not opt.sparsity: # 稠密模型稠密训练
@@ -332,6 +332,8 @@ if __name__ == "__main__":
     elif opt.sparsity and not opt.qat:
         prune_trained_model_custom(model_train, optimizer)
     elif not opt.sparsity and opt.qat:
+        if opt.prune:
+            model.load_state_dict(torch.load(opt.pretrained_model_path, map_location=device).state_dict())
         collect_stats(model, gen_val, num_batches=100)
         amax_computation_method = "entropy"
         compute_amax(model, method=amax_computation_method)

@@ -34,7 +34,7 @@ def generate_model(model_name, num_classes, in_channels=3, pretrained=False, bac
     elif model_name == 'setr': # 效果差
         model = SETRModel(num_classes=num_classes, in_channels=in_channels)
     elif model_name == 'pspnet':
-        model = PSPNet(num_classes=num_classes, in_channels=in_channels)
+        model = PSPNet(num_classes=num_classes, in_channels=in_channels, backbone=backbone)
     elif model_name == 'dssnet': # 效果差
         model = DSS(num_classes, in_channels)
     elif model_name == 'uwunet': # 效果差

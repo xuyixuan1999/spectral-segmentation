@@ -456,40 +456,21 @@ def image_dataset_collate(batch):
 
 if __name__ == "__main__":
     from torch.utils.data.dataloader import DataLoader
-    dataset_root = "/root/spectral-segmentation/datasets/spectral-dataset-multi-nopeople"
-    input_shape = (224,416)
-    num_classes = 11
-    with open(os.path.join(dataset_root, "ImageSets/Segmentation/val.txt"),"r") as f:
+    dataset_root = "/root/spectral-segmentation/datasets/spectral-dataset-multi-nature"
+    input_shape = (416,416)
+    num_classes = 14
+    with open(os.path.join(dataset_root, "ImageSets/Segmentation/trainval.txt"),"r") as f:
         train_lines = f.readlines()
-    # dataset = UnetDatasetMat(train_lines[:100], input_shape, num_classes, True, dataset_root)
+    # dataset = UnetDatasetMat(train_lines    , input_shape, num_classes, True, dataset_root)
     # dataloader = DataLoader(dataset=dataset, batch_size=1, shuffle=True, num_workers=1, collate_fn=image_dataset_collate)
-    dataset = UnetDatasetRGB(train_lines[:100], input_shape, num_classes, True, dataset_root)
-    dataloader = DataLoader(dataset=dataset, batch_size=1, shuffle=True, num_workers=1, collate_fn=image_dataset_collate)
+    dataset = UnetDatasetTwoStream(train_lines    , input_shape, num_classes, True, dataset_root)
+    dataloader = DataLoader(dataset=dataset, batch_size=1, shuffle=True, num_workers=1, collate_fn=two_stream_dataset_collate)
+    
+    # for i, (images, labels, seg_labels) in enumerate(dataloader):
 
-    for i, (images, pngs, labels) in enumerate(dataloader):
-        # image = images[0].numpy() * 255
-        rgbs = images[0].numpy() * 255
-        png = pngs[0].numpy().astype(np.uint8) * 20
-        png = Image.fromarray(png).convert("L")
-        # cv2.imwrite("/root/spectral-segmentation/tmp/%02d-mat.png"%i, image[0])
-        cv2.imwrite("/root/spectral-segmentation/tmp/%02d-rgb.png"%i, rgbs.transpose(1,2,0))
-        # # cv2.imwrite("/root/spectral-segmentation/tmp/%02d-label.png"%i, png)
-        png.save("/root/spectral-segmentation/tmp/%02d-label.png"%i)
-        # if i > 90:
-        #     break
-    
-    # label_path = os.path.join(dataset_root, "JPEGImages", train_lines[0].strip() + ".jpg")
-    # label = Image.open(label_path)
-    # label = np.array(label)
-    # print("label shape: ", label.shape)
-    # print("label max: ", np.max(label))
     
     
-    # image = np.random.randn(25, 217, 409)
-    # with h5py.File(os.path.join(dataset_root, "Train_Spec", '2021-8-17_25m_1_020' + '.mat'), 'r') as mat:
-    #     hyper_image = np.array(mat['cube']).astype('float32')
-    #     image = np.transpose(hyper_image, [2, 1, 0])
-    # cv2.imwrite("hyper_image.png", image[1 ,:, :] * 255)
-    # label_path = os.path.join(dataset_root, "SegmentationClass", "2021-8-17_25m_1_020" + ".png")
     
+    
+
     

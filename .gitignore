@@ -1,6 +1,8 @@
 *
 !*/
 !*.py
+!*img/fig-model.png
 # !*.md
 # !*.txt
 testModel.py
+
